@@ -1,0 +1,118 @@
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+#include <type_traits>
+#include "program_model.h"
+#include "recovery_policy.h"
+#include "nc_endstop.h"
+#include "tmc_config.h"
+struct String : std::string {
+  using std::string::string;
+  String() = default;
+  String(const std::string &s) : std::string(s) {}
+  template<class T, typename std::enable_if<std::is_arithmetic<T>::value,int>::type=0>
+  String(T n):std::string(std::to_string(n)){}
+  void replace(const char *a,const char *b){size_t p=0;while((p=find(a,p))!=npos){std::string::replace(p,strlen(a),b);p+=strlen(b);}}
+};
+uint64_t mono=0; int64_t wall=1800000000; bool validClock=true;
+int64_t esp_timer_get_time(){return mono;}
+time_t nowEpoch(){return validClock?wall:0;}
+bool timeValid(){return validClock;}
+String dateTimeString(time_t t){return String((long long)t);}
+uint32_t esp_random(){static uint32_t id=1;return id++;}
+void advance(unsigned seconds){mono+=uint64_t(seconds)*1000000;wall+=seconds;}
+struct Motor {
+  int32_t current=0,target=0; bool active=false; unsigned commands=0;
+  int32_t getCurrent(){return current;} int32_t getTarget(){return target;}
+  void setCurrent(int32_t x){current=x;} void setTarget(int32_t x){target=x;active=current!=target;if(active)++commands;}
+  bool getState(){return active&&current!=target;}
+  void brake(){active=false;} void stop(){active=false;target=current;}
+  void setMaxSpeed(uint32_t){}
+  void complete(){current=target;active=false;}
+} motor_Naklon,motor_Povorot;
+bool drivers=false;
+void enableDrivers(){drivers=true;} void disableDrivers(){drivers=false;}
+void oledMarkDirty(){}
+// Native controller tests assume an already calibrated, level machine;
+// sensor and calibration persistence have their own dedicated tests.
+bool calibrationValid(){return false;}
+bool zCalStarted=false;
+bool calibrationBusy(){return false;}
+bool calibrationRunReady(){return true;}
+bool overallCalibrationReady(){return true;}
+String overallCalibrationReason(){return String();}
+int32_t currentZSteps360(){return 40392;}
+void startProgram(uint16_t requestedStep = 1);
+String calibrationRunReason(){return String();}
+int32_t calibratedAngleToSteps(float a){return (int32_t)std::round((a-23.)*108410./62.);}
+float calibratedStepsToAngle(int32_t st){return 23.f+(float)st*62.f/108410.f;}
+int32_t calibratedUpperSteps(){return 108410;}
+void calStopWithError(const String&){}
+void calibrationOnLower(int32_t){}
+void calibrationOnUpper(){}
+
+#define DBGLN(x) do{}while(0)
+const int LOW=0,HIGH=1;int lowerPin=LOW,upperPin=LOW;
+/* HARDWARE_CONSTANTS */
+int digitalRead(int pin){return pin==Y_END_PIN?lowerPin:upperPin;}
+const int32_t ANGLE_STEPS[][2]={{23,0},{30,15334},{35,25000},{40,34674},{45,45000},{50,55118},{55,65000},{60,74710},{65,82000},{70,90542},{75,96000},{80,104111},{85,108410}};
+constexpr unsigned ANGLE_COUNT=13;
+constexpr int32_t POVOROT_STEPS_360=40392;
+uint32_t PAUSE_AFTER_NAKLON_MS=500,MAX_ACTION_TIME_SEC=3600,NAKLON_MAX_SPEED=6000,NAKLON_ACCELERATION=10000;
+struct FakeFS;
+struct File {
+  std::vector<uint8_t>*data=nullptr; bool dir=false;size_t pos=0;bool *fail=nullptr;
+  explicit operator bool()const{return data||dir;}
+  bool isDirectory(){return dir;} size_t size(){return data?data->size():0;}
+  size_t read(uint8_t *b,size_t n){if(!data||pos+n>data->size())return 0;memcpy(b,data->data()+pos,n);pos+=n;return n;}
+  size_t write(const uint8_t*b,size_t n){if(!data||*fail)return 0;data->resize(std::max(data->size(),pos+n));memcpy(data->data()+pos,b,n);pos+=n;return n;}
+  void close(){} void flush(){}
+};
+struct FakeFS {
+  std::map<std::string,std::vector<uint8_t>> files;
+  std::set<std::string> dirs;
+  bool fail=false;
+  bool exists(const char*p){return files.count(p)||dirs.count(p);}
+  bool mkdir(const char*p){dirs.insert(p);return !fail;}
+  File open(const char*p,const char*mode){
+    if(dirs.count(p))return {nullptr,true,0,&fail};
+    if(mode[0]=='r'&&!files.count(p))return {};
+    if(mode[0]=='w') files[p].clear();
+    auto &b=files[p];return {&b,false,mode[0]=='a'?b.size():0,&fail};
+  }
+  bool rename(const char*a,const char*b){if(fail||!files.count(a))return false;files[b]=files[a];files.erase(a);return true;}
+} LittleFS;
+struct Prefs {
+  std::map<std::string,std::vector<uint8_t>> blobs;
+  bool isKey(const char*k){return blobs.count(k);}
+  bool remove(const char*k){return blobs.erase(k);}
+  size_t getBytesLength(const char*k){return blobs.count(k)?blobs[k].size():0;}
+  size_t getBytes(const char*k,void *p,size_t n){if(getBytesLength(k)!=n)return 0;memcpy(p,blobs[k].data(),n);return n;}
+} prefs;
+RemuageProgram runProgram={},draftProgram={};
+String draftPath,selectedProgramPath="/prog/Test.csv",executionMessage,logError;
+bool draftLoaded=false,draftDirty=false,programsDirty=false;
+std::vector<RemuageProgram> programs;
+size_t selectedProgram=0;
+void refreshPrograms(bool=false){}
+void copyProgramNameUtf8(char*p,size_t n,const String&s){snprintf(p,n,"%s",s.c_str());}
+bool recoveryRequired=false,recoveryMotionUncertain=false;
+ProgramInterval stepInterval,settleInterval;
+uint64_t actionStartedUs=0;uint32_t executionHash=0;
+bool programRunning=false,programPaused=false,pauseStopPending=false;
+uint16_t currentProgramStep=0;
+bool serialMoveNaklonActive=false,serialMovePovorotActive=false,motorNaklonMoving=false,motorPovorotMoving=false;
+int moveDirectionNaklon=0,moveDirectionPovorot=0;
+bool endstopYActive=false,endstopUpperActive=false,yEndstopFault=false;
+NcEndstop lowerEndstop,upperEndstop;
+bool homingActive=false,recoveryAutoPending=false,recoveryPowerLogged=false;
+uint64_t homingStartedUs=0,recoveryReadyUs=0,lastCheckpointUs=0;
+time_t scheduledEpoch[MAX_PROGRAM_STEPS+1]={};bool scheduleValid=false;

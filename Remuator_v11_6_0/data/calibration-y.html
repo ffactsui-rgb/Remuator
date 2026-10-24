@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Калибровка Y — Remuage-VRN</title>
+  <link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css">
+  <script type="module" src="/calibration-y.js"></script>
+  <script src="/site-shell.js" defer></script>
+  </head>
+<body>
+  <header id="siteHeader"></header>
+  <main>
+    <h1>Калибровка Y</h1>
+      <nav class="settings-tabs" aria-label="Разделы настроек">
+        <a href="/settings">Основные</a>
+        <a href="/settings/calibration-y" aria-current="page">Калибровка Y</a>
+        <a href="/settings/calibration-z">Калибровка Z</a>
+        <a href="/settings/uart">UART / TMC</a>
+        <a href="/settings/about">О программе</a>
+      </nav>
+
+    <div id="error" role="alert" hidden></div>
+    <section class="card">
+      <h2>1. ADXL345 и физические оси</h2>
+      <p>Выберите, какая ось микросхемы соответствует наклону Y и какая контролирует горизонт X. Две одинаковые оси выбирать нельзя.</p>
+      <p id="sensorState" class="notice">Поиск ADXL345…</p>
+      <div class="axis-values" id="axesLive" aria-live="polite">
+        <div>ADXL X: <b id="ax">—</b> g</div><div>ADXL Y: <b id="ay">—</b> g</div><div>ADXL Z: <b id="az">—</b> g</div>
+        <div>Угол Y: <b id="tilt">—</b>°</div><div>Угол X: <b id="roll">—</b>°</div>
+      </div>
+      <form id="axesForm">
+        <fieldset id="axesField">
+          <div class="fields">
+            <fieldset class="axis-choices"><legend>Физическая ось для наклона Y</legend>
+              <label><input type="radio" name="yAxis" value="0"> X</label>
+              <label><input type="radio" name="yAxis" value="1" checked> Y</label>
+              <label><input type="radio" name="yAxis" value="2"> Z</label></fieldset>
+            <fieldset class="axis-choices"><legend>Физическая ось контроля горизонта X</legend>
+              <label><input type="radio" name="xAxis" value="0" checked> X</label>
+              <label><input type="radio" name="xAxis" value="1"> Y</label>
+              <label><input type="radio" name="xAxis" value="2"> Z</label></fieldset>
+            <label>Допуск отклонения X, ° <input name="xTolerance" type="number" min="0.2" max="15" step="0.1" required></label>
+          </div>
+          <button type="submit">Сохранить выбор осей и допуск</button>
+        </fieldset>
+      </form>
+    </section>
+    <section class="card">
+      <h2>2. Горизонтальная устойчивость X</h2>
+      <p>Выставьте корпус ремюатора горизонтально регулировочными ножками, желательно с внешним уровнем. После этого запомните показание X.</p>
+      <p id="xState" class="notice">—</p>
+      <button id="rememberX">Запомнить X</button>
+    </section>
+    <section class="card">
+      <h2>3. Автоматическое измерение Y</h2>
+      <p class="warning">Снимите бутылки и освободите механизм. При запуске Y сначала едет к NC-концевику 85°, затем к NC-концевику 23°. Перед первым пуском проверьте правильность направления и аварийную остановку.</p>
+      <div class="toolbar"><button id="start" class="primary">Начать калибровку</button><button id="cancel" class="danger">Стоп</button></div>
+      <p id="phase" role="status" aria-live="polite">—</p><p id="summary" class="muted"></p>
+    </section>
+    <section class="card">
+      <h2>4. Таблица измерений по 1°</h2>
+      <p>Шаги от нижнего концевика рассчитываются по полному проходу между концевиками. Во время движения таблица собирается в памяти; отображается после остановки.</p>
+      <div class="table-scroll"><table><thead><tr><th>Измеренный угол, °</th><th>Шаги от 85°</th><th>Шаги от 23°</th></tr></thead><tbody id="rawRows"><tr><td colspan="3">Нет измерений</td></tr></tbody></table></div>
+    </section>
+    <section class="card">
+      <h2>5. Коррекция минимума и сохранение</h2>
+      <p>После достижения нижнего концевика проверьте минимальный угол внешним угломером. Введите правильное значение (0–40°); если оно больше 23°, механика не сможет физически достичь угла 23° и программа будет ограничена концевиком; прошивка пересчитает таблицу шагов с привязкой верхнего концевика к 85°.</p>
+      <form id="saveForm"><label>Исправленный минимальный угол, ° <input id="minAngle" name="minAngle" type="number" min="0" max="40" step="1" required value="23"></label>
+        <button id="save" class="primary" type="submit" disabled>Пересчитать и записать калибровку</button></form>
+      <p>После сохранения таблица хранится в NVS и в файле <code>/calibration_y.csv</code>.</p>
+      <h3>Текущая сохранённая таблица</h3>
+      <div class="table-scroll"><table><thead><tr><th>Угол Y, °</th><th>Шаги от нижнего концевика</th></tr></thead><tbody id="savedRows"><tr><td colspan="2">Калибровка ещё не сохранена</td></tr></tbody></table></div>
+    </section>
+    <p id="status" role="status"></p>
+</main>
+    <footer id="siteFooter"></footer>
+</body>
+</html>

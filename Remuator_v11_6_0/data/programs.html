@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Программы — Remuage-VRN</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/programs.js"></script>
+    <script src="/site-shell.js" defer></script>
+  </head>
+  <body>
+    <header id="siteHeader"></header>
+    <main>
+      <h1>Программы</h1>
+      <div id="error" role="alert" hidden></div>
+      <section class="card">
+        <p>
+          Файлы программ находятся в <code>/prog</code>. Название программы
+          берётся из имени CSV.
+        </p>
+        <p id="summary">Загрузка списка…</p>
+        <a class="button" data-manager href="#">Открыть файловый менеджер</a>
+      </section>
+      <section id="programList" class="grid"></section>
+      <p id="status" role="status" aria-live="polite"></p>
+</main>
+    <footer id="siteFooter"></footer>
+  </body>
+</html>

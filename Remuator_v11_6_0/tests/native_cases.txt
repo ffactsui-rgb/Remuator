@@ -1,0 +1,162 @@
+void fresh() {
+  LittleFS=FakeFS{};prefs.blobs.clear();
+  executionJournal.~CheckedJournal();new(&executionJournal) CheckedJournal<ExecutionFileStorage,ExecutionRecord>(executionStorage);
+  mono=0;wall=1800000000;validClock=true;motor_Naklon={};motor_Povorot={};
+  runMeta={};execState={};recoveryAutoPending=recoveryRequired=recoveryMotionUncertain=false;
+  executionReadError=executionJournalDegraded=homingActive=pauseStopPending=false;
+  programRunning=programPaused=serialMoveNaklonActive=serialMovePovorotActive=false;
+  motorNaklonMoving=motorPovorotMoving=endstopYActive=endstopUpperActive=yEndstopFault=false;
+  lowerPin=upperPin=LOW;lowerEndstop={};upperEndstop={};
+  programState=IDLE;currentProgramStep=0;programs.clear();
+  RemuageProgram p={};std::string error;
+  assert(parseProgramCsv("Step;incAngle;Angle;IncRot;Rot;Pause\n1;7;;1;;00:00:30\n2;1;;-1;;00:00:30\n3;-1;;0;;00:00:30\n",p,error));
+  strcpy(p.name,"Test");programs.push_back(p);startProgram();assert(programRunning);
+}
+void rebootAt(int64_t epoch) {
+  mono=0;wall=epoch;motor_Naklon={};motor_Povorot={};
+  programRunning=programPaused=false;serialMoveNaklonActive=serialMovePovorotActive=false;
+  recoveryRequired=recoveryAutoPending=recoveryMotionUncertain=false;
+  executionReadError=false;executionMessage="";
+  restoreExecutionAfterBoot();
+}
+void finishAxes() {
+  motor_Naklon.complete();executeProgram();
+  advance(1);executeProgram();executeProgram();
+  motor_Povorot.complete();executeProgram();
+}
+int main(){
+  // Remaining interval: confirmed axes do not move again; the original deadline survives.
+  fresh();finishAxes();assert(execState.naklonCompleted&&execState.povorotCompleted);
+  std::string log=runMeta.logPath;rebootAt(1800000005);assert(programPaused&&recoveryAutoPending);
+  advance(9);serviceRecovery();assert(programPaused);
+  advance(1);serviceRecovery();assert(!programPaused&&currentProgramStep==0);
+  assert(motor_Naklon.commands==0&&motor_Povorot.commands==0);
+  assert(stepInterval.remaining(mono)==15000000);assert(scheduledEpoch[1]==1800000030);
+  assert(log==runMeta.logPath);advance(15);executeProgram();assert(currentProgramStep==1);
+  assert(scheduledEpoch[1]==1800000030);
+  // Overdue completed step starts exactly one next step, with no burst of missed steps.
+  fresh();finishAxes();rebootAt(1800000100);advance(10);serviceRecovery();
+  assert(currentProgramStep==1&&programState==MOVING_NAKLON);
+  assert(scheduledEpoch[1]==1800000110&&scheduledEpoch[2]==1800000140&&scheduledEpoch[3]==1800000170);
+  assert(runMeta.startedEpoch==1800000000);
+  // Without encoders it is unsafe to autostart if the last saved state was moving.
+  fresh();motor_Naklon.current=500;execState.povorotCompleted=true;assert(saveExecution());
+  rebootAt(1800000100);assert(motor_Naklon.current==500&&recoveryMotionUncertain);
+  assert(!recoveryAutoPending&&programPaused);advance(10);serviceRecovery();
+  assert(motor_Naklon.commands==0&&motor_Naklon.target==500);
+  assert(!resumeProgram());
+  // Same safety rule for a partial rotation (Z).
+  fresh();motor_Naklon.complete();executeProgram();advance(1);executeProgram();executeProgram();
+  motor_Povorot.current=1000;assert(saveExecution());
+  rebootAt(1800000100);advance(10);serviceRecovery();
+  assert(recoveryMotionUncertain&&!recoveryAutoPending&&motor_Povorot.target==1000);
+  assert(motor_Povorot.commands==0&&!resumeProgram());
+  // Pause and Stop cancel the countdown. Invalid clocks never authorize a timed restart.
+  fresh();finishAxes();rebootAt(1800000005);assert(pauseProgram());advance(20);serviceRecovery();assert(programPaused&&!recoveryAutoPending);
+  stopProgram();advance(20);serviceRecovery();assert(!programRunning);
+  fresh();finishAxes();validClock=false;rebootAt(1800000005);advance(11);serviceRecovery();assert(programPaused);
+  validClock=true;serviceRecovery();assert(!programPaused);
+  // If the pause was saved before outage it must remain a manual pause.
+  fresh();finishAxes();assert(pauseProgram());rebootAt(1800000005);
+  assert(!recoveryAutoPending&&programPaused&&!recoveryMotionUncertain);
+  advance(20);serviceRecovery();assert(programPaused);
+  assert(resumeProgram()&&!programPaused);
+  // Finish survives reboot; hiding the notice does not delete the one run log.
+  fresh();currentProgramStep=2;execState.naklonCompleted=execState.povorotCompleted=true;
+  programState=WAITING_BETWEEN_STEPS;scheduledEpoch[3]=1800000090;assert(saveExecution());
+  log=runMeta.logPath;rebootAt(1800000100);advance(10);serviceRecovery();
+  assert(!programRunning&&runMeta.finishedEpoch==1800000110&&runMeta.noticeVisible);
+  { auto &bytes=LittleFS.files[log];std::string text(bytes.begin(),bytes.end());
+    assert(text.find("FINISH | Шаг 3")!=std::string::npos);
+    assert(text.find("POWER_LOSS")!=std::string::npos&&text.find("POWER_ON")!=std::string::npos); }
+  rebootAt(1800000200);assert(!programRunning&&runMeta.finishedEpoch==1800000110&&runMeta.noticeVisible);
+  runMeta.noticeVisible=false;assert(saveExecution());rebootAt(1800000210);assert(!runMeta.noticeVisible&&LittleFS.exists(log.c_str()));
+  unsigned logFiles=0;for(auto &f:LittleFS.files) if(f.first.rfind("/Logs/",0)==0)++logFiles;assert(logFiles==1);
+  // A failed write prevents automatic movement. A damaged slot can fall back to a whole record.
+  fresh();LittleFS.fail=true;assert(!saveExecution());assert(programPaused&&recoveryMotionUncertain&&!recoveryAutoPending);
+  LittleFS.fail=false;rebootAt(1800000050);assert(programRunning&&recoveryMotionUncertain&&!recoveryAutoPending);
+  advance(10);serviceRecovery();assert(programPaused);
+  // Legacy v11.2 packet layout migrates while preserving seconds and the program snapshot.
+  fresh();LegacyExecutionRecord old{};old.execution=execState;old.program=runProgram;
+  old.execution.magic=V112_EXEC_MAGIC;old.execution.checksum=0;old.execution.checksum=programHashBytes(&old.execution,sizeof(old.execution));
+  LittleFS.files.clear();CheckedJournal<ExecutionFileStorage,LegacyExecutionRecord> legacy(executionStorage);assert(legacy.save(old));
+  rebootAt(1800000005);assert(runProgram.steps[0].pauseSeconds==30&&recoveryMotionUncertain&&!recoveryAutoPending);
+  rebootAt(1800000006);assert(runProgram.steps[0].pauseSeconds==30);
+  // Real NC wiring: HIGH is an open/pressed stop; both pins LOW is normal travel.
+  static_assert(Y_END_PIN==14 && Y_UPPER_END_PIN==13, "Y pin assignment");
+  fresh();stopProgram();motor_Naklon.current=90000;motor_Naklon.target=90000;motor_Povorot.current=123;motor_Povorot.target=123;
+  assert(beginHoming());assert(motor_Naklon.target==90000-Y_ENDSTOP_SEARCH_STEPS);lowerPin=HIGH;checkEndstops();
+  assert(!homingActive&&motor_Naklon.current==0&&motor_Povorot.current==123);
+  assert(!canMoveY(-1)&&canMoveY(1)); // Leaving lower switch is permitted.
+  motor_Naklon.setTarget(5000);checkEndstops();assert(motor_Naklon.target==5000);
+  motor_Naklon.current=10;checkEndstops();assert(motor_Naklon.current==10); // No repeated zero while leaving.
+  motor_Naklon.brake();motor_Naklon.setTarget(10);
+  lowerPin=LOW;checkEndstops();assert(endstopYActive);mono+=19999;checkEndstops();assert(endstopYActive);
+  lowerPin=HIGH;checkEndstops();lowerPin=LOW;checkEndstops();mono+=20000;checkEndstops();assert(!endstopYActive);
+  // Missing switch never establishes a false zero at the end of the bounded search.
+  assert(beginHoming());motor_Naklon.complete();int32_t unfound=motor_Naklon.current;serviceHoming();
+  assert(!homingActive&&motor_Naklon.current==unfound&&unfound!=0);
+  assert(executionMessage.find("не найден")!=String::npos);
+  // Upper Y stops Y, never Z; leaving the upper stop downwards is allowed.
+  fresh();stopProgram();motor_Naklon.current=100000;motor_Naklon.setTarget(150000);
+  motor_Povorot.setTarget(12345);upperPin=HIGH;checkEndstops();
+  assert(motor_Naklon.current==108410&&motor_Naklon.target==108410&&runMeta.upperReached);
+  assert(motor_Povorot.getState()&&motor_Povorot.target==12345);
+  assert(!canMoveY(1)&&canMoveY(-1));motor_Naklon.setTarget(90000);checkEndstops();assert(motor_Naklon.target==90000);
+  upperPin=LOW;checkEndstops();mono+=20000;checkEndstops();assert(!endstopUpperActive&&!runMeta.upperReached);
+  // Simultaneously open inputs inhibit Y without inventing either limit coordinate.
+  motor_Naklon.current=80000;lowerPin=upperPin=HIGH;checkEndstops();
+  assert(yEndstopFault&&motor_Naklon.current==80000&&!motor_Naklon.getState());
+  assert(motor_Povorot.getState()&&!canMoveY(1)&&!canMoveY(-1));
+  motor_Povorot.complete();assert(!beginHoming());startProgram();assert(!programRunning);
+  lowerPin=LOW;checkEndstops();mono+=20000;checkEndstops();
+  assert(!yEndstopFault&&motor_Naklon.current==108410&&canMoveY(-1));
+  // A Y wiring fault pauses a running program and cancels an automatic restart.
+  fresh();lowerPin=upperPin=HIGH;checkEndstops();assert(programPaused&&!recoveryAutoPending);
+  assert(!resumeProgram()&&!execState.naklonCompleted);
+  // Excessive CSV tilt searches for the upper switch, then is marked complete.
+  fresh();runProgram.steps[0].angleNaklon=100;beginNaklonAction();
+  assert(motor_Naklon.target==108410);upperPin=HIGH;checkEndstops();executeProgram();
+  assert(execState.naklonCompleted&&programRunning&&runMeta.upperReached);
+  // Later excessive steps at the pressed upper switch complete without more travel.
+  runMeta.upperReached=false;execState.naklonCompleted=false;beginNaklonAction();
+  assert(programRunning&&motor_Naklon.target==108410);executeProgram();
+  // Missing upper stop on an excessive target is an error, not silent success.
+  fresh();runProgram.steps[0].angleNaklon=100;beginNaklonAction();motor_Naklon.complete();executeProgram();
+  assert(!programRunning&&executionMessage.find("концевик")!=String::npos);
+  // Driver topology validation: fixed 2208 address, all 2209 jumpers, swaps, collisions.
+  TmcUartSettings y{TmcModel::Tmc2208,0}, z{TmcModel::Tmc2209,1};
+  assert(!tmcBusError(y,z));
+  for (uint8_t a=1;a<4;++a){z.address=a;assert(!tmcBusError(y,z));}
+  z.address=0;assert(tmcBusError(y,z));y.address=1;assert(tmcBusError(y,z));
+  y.model=TmcModel::Tmc2209;z.model=TmcModel::Tmc2208;assert(!tmcBusError(y,z));
+  y.model=TmcModel::Tmc2208;y.address=0;assert(tmcBusError(y,z));
+  y.model=TmcModel::Tmc2209;y.address=4;assert(tmcBusError(y,z));
+  y.model=(TmcModel)1234;assert(tmcBusError(y,z));
+  // Only excessive upper Y becomes a warning; bad syntax, low Y and other errors still reject.
+  RemuageProgram p{};std::string err;
+  assert(parseProgramCsv("Step;incAngle;Angle;IncRot;Rot;Pause\n1;100;;0;;00:00:30\n",p,err));
+  assert(programExceedsTiltRange(p));assert(angleToStepsNaklon(p.steps[0].angleNaklon)==108410);
+  assert(!parseProgramCsv("Step;incAngle;Angle;IncRot;Rot;Pause\n1;-1;;0;;00:00:30\n",p,err));
+  assert(!parseProgramCsv("Step;incAngle;Angle;IncRot;Rot;Pause\n1;100;;0;;00:00:99\n",p,err));
+  // Start from arbitrary selected step: previous Z rotation must NOT be replayed.
+  fresh();stopProgram();
+  startProgram(2);
+  assert(programRunning && currentProgramStep==1 && scheduledEpoch[0]==0);
+  assert(motor_Povorot.getCurrent()==programRotationSteps(runProgram.steps[0].rotationParts,40392));
+  motor_Naklon.complete();executeProgram();advance(1);executeProgram();executeProgram();
+  const auto zBefore=motor_Povorot.getCurrent();
+  const auto zWanted=programRotationSteps(runProgram.steps[1].rotationParts,40392);
+  assert(zBefore==programRotationSteps(runProgram.steps[0].rotationParts,40392));
+  assert(motor_Povorot.getTarget()==zWanted);
+  assert(motor_Povorot.getTarget()-zBefore==programRotationSteps(-1,40392));
+  stopProgram();
+  startProgram(0);assert(!programRunning);
+  startProgram(4);assert(!programRunning);
+  // Normal start still begins on index zero.
+  fresh();
+  for (int i=0;i<200;++i) { stopProgram();startProgram();assert(programRunning&&!programPaused); }
+  unsigned logs=0;for (auto &f:LittleFS.files) if(f.first.rfind("/Logs/",0)==0)++logs;
+  assert(logs==201&&prefs.blobs.empty());
+  std::cout<<"PASS: real controller functions, recovery deadline/overdue/axis flags/10s/cancel/clock, corruption fallback, legacy migration, one log, persistent finish/dismiss, NC switches GPIO14/13, debounce, direction guards, wiring fault, real homing, bounded upper search, UART topology, angle warning.\n";
+}
