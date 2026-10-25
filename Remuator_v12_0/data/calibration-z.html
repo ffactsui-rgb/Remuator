@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Калибровка Z — Remuage-VRN</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css">
+<script type="module" src="/calibration-z.js"></script><script src="/site-shell.js" defer></script><script type="module" src="/parameter-help.js"></script></head><body>
+<header id="siteHeader"></header><main>
+<h1>Калибровка Z — полный оборот 360°</h1>
+<nav class="settings-tabs" aria-label="Разделы настроек"><a href="/settings">Основные</a><a href="/settings/calibration-y">Калибровка Y</a><a href="/settings/calibration-z" aria-current="page">Калибровка Z</a><a href="/settings/uart">Настройки TMC</a><a href="/settings/serial">Serial</a>
+        <a href="/settings/about">О программе</a></nav>
+<div id="error" role="alert" hidden></div>
+<section class="card"><h2>1. Микрошаг драйвера Z (TMC2209)</h2>
+<p>Это тот же параметр, что на странице UART / TMC. Изменение вступает в силу только после подтверждения записи по UART и сбрасывает калибровку Z.</p>
+<form id="microForm"><label>Микрошаг Z <select id="micro" name="micro" required>
+<option>1</option><option>2</option><option>4</option><option>8</option><option>16</option><option>32</option><option>64</option><option>128</option><option>256</option>
+</select></label> <button type="submit">Сохранить микрошаг ↵</button></form>
+<p id="calState" class="notice" role="status">Проверка калибровки…</p>
+</section>
+<section class="card"><h2>2. Задать исходное положение</h2>
+<p>Установите хорошо видимую метку на вращающейся части механизма и неподвижный указатель на корпусе. Нажмите «Запуск» — координата Z будет обнулена. Для точного оборота метка должна вернуться к указателю после ровно 360°.</p>
+<button class="primary" id="begin">Запуск — зафиксировать 0 STEP</button></section>
+<section class="card"><h2>3. Повернуть один полный оборот</h2>
+<p class="warning">Проверяйте без бутылок, что движение безопасно и не натягивает провода. Держите кнопку направления; при отпускании двигатель останавливается. Отдельная кнопка «Стоп» останавливает немедленно.</p>
+<div class="z-steps" id="position" aria-live="polite">0 STEP</div>
+<p id="estimated" class="muted"></p>
+<div class="toolbar z-jog"><button id="left" type="button">◀ Влево</button><button id="right" type="button">Вправо ▶</button><button id="stop" class="danger" type="button">■ Стоп</button><button id="cancel" type="button">Отменить калибровку</button></div>
+<div class="toolbar z-jog"><button id="minus10" type="button">−10 STEP</button><button id="minus1" type="button">−1 STEP</button><button id="plus1" type="button">+1 STEP</button><button id="plus10" type="button">+10 STEP</button></div>
+<p>Подведите метку точно к исходному указателю, используя короткие нажатия вправо / влево или точную подводку. Число STEP — абсолютная разница от нажатия «Запуск», со знаком направления.</p>
+</section>
+<section class="card"><h2>4. Сохранение</h2>
+<p>После ровно одного полного оборота нажмите «Стоп», убедитесь, что двигатель стоит, и сохраните результат. Сохраняются абсолютное число STEP за 360° и текущий микрошаг. Настройка находится в NVS и в файле <code>/calibration_z.csv</code>.</p>
+<button class="primary" id="save">Сохранить шаги на 360°</button><p id="message" role="status"></p>
+</section>
+</main><footer id="siteFooter"></footer></body></html>
