@@ -50,11 +50,16 @@ struct Server {
 } server;
 struct Motor {
   bool active = false;
+  int32_t acceleration=0, speed=0;
+  void setAcceleration(int32_t n) {acceleration=n;}
+  void setMaxSpeed(int32_t n) {speed=n;}
   bool getState() { return active; }
 } motor_Naklon, motor_Povorot;
 bool programRunning = false, motorNaklonMoving = false, motorPovorotMoving = false;
 void redirectHome() { server.send(200, "text/plain", "OK"); }
 void disableDrivers() {}
+void releaseDrivers() {}
+uint32_t NAKLON_ACCELERATION=10000,POVOROT_ACCELERATION=10000,NAKLON_MAX_SPEED=5000,POVOROT_MAX_SPEED=5000;
 void delay(int) {}
 #define DBGLN(x)                                                                                   \
   do {                                                                                             \

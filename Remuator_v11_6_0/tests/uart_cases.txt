@@ -102,6 +102,21 @@ int main() {
   dropWrites[currentY.address] = false;
   postMotor("nak");
   assert(server.code == 200 && tmcNaklon.settingsApplied);
+  // Hold selection, percent conversion and axis-specific motion tuning persist together.
+  server.args["holdEnabled"]="on";server.args["holdPercent"]="37";
+  server.args["na"]="1234";server.args["ns"]="5678";
+  handleUartSettingsSave();
+  assert(server.code==200 && uartNaklon.holdEnabled);
+  assert(std::abs(uartNaklon.holdMultiplier-0.37f)<0.001f);
+  assert(NAKLON_ACCELERATION==1234 && NAKLON_MAX_SPEED==5678);
+  assert(motor_Naklon.acceleration==1234 && motor_Naklon.speed==5678);
+  loadTmcSettings(loadedY,"tn");
+  assert(loadedY.holdEnabled && std::abs(loadedY.holdMultiplier-0.37f)<0.001f);
+  before=writes.size();saved=prefs.values;
+  server.args["ns"]="oops";handleUartSettingsSave();
+  assert(server.code==422 && writes.size()==before && prefs.values==saved);
+  server.args["ns"]="5678";server.args.erase("holdEnabled");handleUartSettingsSave();
+  assert(server.code==200 && !uartNaklon.holdEnabled);
   // Program (including pause) and either manual axis forbid reconfiguration.
   before = writes.size();
   saved = prefs.values;

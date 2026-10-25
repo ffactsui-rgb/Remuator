@@ -87,6 +87,7 @@ void handleCalibrationAction() {
     }
     calYAxis=y;calXAxis=x;calToleranceX=tol;
     prefs.putUChar("calYaxis",y);prefs.putUChar("calXaxis",x);prefs.putFloat("calXtol",tol);
+    if(!calSaveXFile()) {server.send(503,"text/plain; charset=utf-8","Не удалось сохранить файл X");return;}
   } else if(action=="rememberX") {
     if(calibrationBusy() || motor_Naklon.getState()) {
       server.send(409,"text/plain; charset=utf-8","Не меняйте эталон X при движении");return;
@@ -97,7 +98,17 @@ void handleCalibrationAction() {
     }
     calRefX=calCurrentX;calXStored=true;
     prefs.putFloat("calXref",calRefX);prefs.putBool("calXset",true);
-    calMessage="Эталон горизонтали X сохранён";
+    if(!calSaveXFile()) {server.send(503,"text/plain; charset=utf-8","Не удалось сохранить файл X");return;}
+    calMessage="Эталон горизонтали X сохранён в NVS и /calibration_x.csv";
+  } else if(action=="use") {
+    if(calibrationBusy()) {server.send(409,"text/plain","CALIBRATION_BUSY");return;}
+    CalBlob stored;
+    if(!calLoadFile(stored) || stored.yAxis!=calYAxis || stored.xAxis!=calXAxis) {
+      server.send(422,"text/plain; charset=utf-8","Файл калибровки Y отсутствует, повреждён или не соответствует выбранным осям");return;
+    }
+    calActive=stored;calTableValid=true;calPhase=CAL_IDLE;
+    prefs.putBytes("yCalBlob",&calActive,sizeof(calActive));
+    calMessage="Используется сохранённая калибровка. Проверьте горизонт X и положение механики.";
   } else if(action=="start") {
     String why;
     if(!calibrationBegin(why)) {server.send(409,"text/plain; charset=utf-8",why);return;}

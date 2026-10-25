@@ -4,7 +4,9 @@ const $ = (id) => document.getElementById(id);
 $("back").href =
   `${location.protocol}//${location.hostname}/?reload=${Date.now()}`;
 function msg(t, bad = false) {
-  $("message").textContent = t;
+  $("message").textContent = bad ? t + " Как исправить: " + (/fetch|network|Load failed/i.test(String(t))
+    ? "Проверьте питание, подключение к Wi-Fi контроллера и его IP; файловый менеджер работает на порту 8080. Повторите запрос."
+    : "Проверьте путь, имя файла и свободное место; остановите двигатели перед изменением файлов и повторите действие.") : t;
   $("message").className = bad ? "error" : "";
 }
 function esc(s) {

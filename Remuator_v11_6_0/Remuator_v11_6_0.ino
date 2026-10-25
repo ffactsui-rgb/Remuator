@@ -225,6 +225,7 @@ SemaphoreHandle_t controlMutex = nullptr;
 // Requests must be rejected BEFORE taking the mutex while STEP pulses run.
 bool stepMotionPending();
 bool calibrationBusy();
+bool controllerRestartPending();
 class ControlGuard {
 public:
   ControlGuard() {
@@ -246,14 +247,16 @@ public:
                      // Reading CSV/program tables, rendering HTML and LittleFS work
                      // cannot hold the control mutex while GyverStepper.tick runs.
                      if (stepMotionPending() && path != "/api/calibration/z" && path != "/api/manual" &&
-                         path != "/api/power" && path != "/program/stop") {
+                         path != "/api/power" && path != "/program/stop" && path != "/api/reboot" && path != "/api/motor-test") {
                        request->send(423,"text/plain; charset=utf-8", "Двигатели движутся; обновите страницу после остановки");
                        return;
                      }
                      ControlGuard guard;
                      currentRequest = request;
                      responseHeaders.clear();
-                     handler();
+                     if (controllerRestartPending() && path != "/api/reboot")
+                       request->send(409,"text/plain; charset=utf-8","Контроллер перезагружается; дождитесь запуска");
+                     else handler();
                      currentRequest = nullptr;
                    });
   }
@@ -268,7 +271,8 @@ public:
           ControlGuard guard;
           currentRequest = request;
           responseHeaders.clear();
-          handler();
+          if(controllerRestartPending()) request->send(409,"text/plain; charset=utf-8","Контроллер перезагружается; дождитесь запуска");
+          else handler();
           currentRequest = nullptr;
         },
         [this, uploadHandler](AsyncWebServerRequest *request, String filename, size_t index,
@@ -607,15 +611,31 @@ inline bool stepMotionPending() {
          homingActive || pauseStopPending ||
          serialMoveNaklonActive || serialMovePovorotActive;
 }
+char startupSerial[24577] = {};
+size_t startupSerialLength = 0;
+std::atomic<bool> captureStartupSerial{true};
+portMUX_TYPE startupSerialMux = portMUX_INITIALIZER_UNLOCKED;
 #if SERIAL_DEBUG
-#define DBG(x) do { if (serialOutputEnabled && !stepMotionPending()) Serial.print(x); } while (0)
-#define DBGLN(x) do { if (serialOutputEnabled && !stepMotionPending()) Serial.println(x); } while (0)
+template<typename T> void captureStartup(const T &value) {
+  if (!captureStartupSerial.load()) return;
+  String part(value);
+  portENTER_CRITICAL(&startupSerialMux);
+  if (captureStartupSerial.load() && startupSerialLength + part.length() <= sizeof(startupSerial)-1) {
+    memcpy(startupSerial+startupSerialLength,part.c_str(),part.length());
+    startupSerialLength += part.length();startupSerial[startupSerialLength]=0;
+  }
+  portEXIT_CRITICAL(&startupSerialMux);
+}
+#define DBG(x) do { if (!stepMotionPending()) { captureStartup(x); if (serialOutputEnabled) Serial.print(x); } } while (0)
+#define DBGLN(x) do { if (!stepMotionPending()) { captureStartup(x); captureStartup("\n"); if (serialOutputEnabled) Serial.println(x); } } while (0)
 // Minimum unused loopTask stack since boot (ESP-IDF reports bytes).
 void debugLoopStack(const char *stage) {
-  if (!serialOutputEnabled || stepMotionPending()) return;
-  Serial.printf("[stack] %s: low-water free=%u / %u bytes\n", stage,
+  if (stepMotionPending()) return;
+  char line[160];
+  snprintf(line,sizeof(line),"[stack] %s: low-water free=%u / %u bytes\n", stage,
                 (unsigned)uxTaskGetStackHighWaterMark(nullptr),
                 (unsigned)getArduinoLoopTaskStackSize());
+  DBG(line);
 }
 #else
 #define DBG(x)
@@ -690,12 +710,28 @@ void setConnectionLED() {
 //                         УТИЛИТЫ
 // ============================================================
 
+bool normalDriverPower = false;
+uint32_t rebootAt = 0;
+bool controllerRestartPending() {return rebootAt != 0;}
+bool motorTestActive = false;
+uint32_t motorTestHeartbeat = 0, motorTestStarted = 0;
+void releaseDrivers() {
+  if(yEndstopFault || recoveryMotionUncertain || rebootAt) {
+    normalDriverPower=false;
+    digitalWrite(Y_ENABLE_PIN,HIGH);digitalWrite(Z_ENABLE_PIN,HIGH);return;
+  }
+  normalDriverPower = true;
+  digitalWrite(Y_ENABLE_PIN, (uartNaklon.holdEnabled || motor_Naklon.getState()) ? LOW : HIGH);
+  digitalWrite(Z_ENABLE_PIN, (uartPovorot.holdEnabled || motor_Povorot.getState()) ? LOW : HIGH);
+}
 void enableDrivers() {
+  normalDriverPower = true;
   digitalWrite(Y_ENABLE_PIN, LOW);
   digitalWrite(Z_ENABLE_PIN, LOW);
 }
 
 void disableDrivers() {
+  normalDriverPower = false;
   digitalWrite(Y_ENABLE_PIN, HIGH);
   digitalWrite(Z_ENABLE_PIN, HIGH);
 }
@@ -1413,7 +1449,7 @@ void checkEndstops() {
     if (!programRunning)
       serialMoveNaklonActive = false;
     if (!motor_Povorot.getState()) {
-      disableDrivers();
+      releaseDrivers();
       if (!programRunning && !calibrationBusy())
         saveExecution();
     }
@@ -1430,7 +1466,7 @@ void checkEndstops() {
     if (!programRunning)
       serialMoveNaklonActive = false;
     if (!motor_Povorot.getState()) {
-      disableDrivers();
+      releaseDrivers();
       if (!programRunning && !calibrationBusy())
         saveExecution();
     }
@@ -1594,7 +1630,7 @@ void stopProgram() {
   motor_Povorot.setTarget(motor_Povorot.getCurrent());
   motorNaklonMoving = false;
   motorPovorotMoving = false;
-  disableDrivers();
+  releaseDrivers();
   resetExecution();
   programsDirty = true;
   DBGLN("ПРОГРАММА ОСТАНОВЛЕНА");
@@ -1666,7 +1702,7 @@ bool pauseProgram() {
   motor_Povorot.stop();
   if (!motor_Naklon.getState() && !motor_Povorot.getState()) {
     pauseStopPending = false;
-    disableDrivers();
+    releaseDrivers();
   }
   saveExecution();
   oledMarkDirty();
@@ -1705,7 +1741,7 @@ void executeProgram() {
   if (programPaused) {
     if (pauseStopPending && !motor_Naklon.getState() && !motor_Povorot.getState()) {
       pauseStopPending = false;
-      disableDrivers();
+      releaseDrivers();
       saveExecution();
     }
     return;
@@ -1739,7 +1775,7 @@ void executeProgram() {
       }
       serialMoveNaklonActive = false;
       motorNaklonMoving = false;
-      disableDrivers();
+      releaseDrivers();
       execState.naklonCompleted = true;
       programState = execState.povorotCompleted ? WAITING_BETWEEN_STEPS : WAITING_AFTER_NAKLON;
       if (execState.povorotCompleted) {
@@ -1766,7 +1802,7 @@ void executeProgram() {
     if (motor_Povorot.getCurrent() == motor_Povorot.getTarget()) {
       serialMovePovorotActive = false;
       motorPovorotMoving = false;
-      disableDrivers();
+      releaseDrivers();
       // Keep the cumulative position: resume must not add IncRot a second time.
       execState.povorotCompleted = true;
       execState.lastCompletedStep = currentProgramStep + 1;
@@ -1843,7 +1879,7 @@ void handleButtons() {
       serialMoveNaklonActive = false;
       motor_Naklon.brake();
       motor_Naklon.setTarget(motor_Naklon.getCurrent());
-      disableDrivers();
+      releaseDrivers();
       executionMessage = "Возврат в начало остановлен";
     }
     return;
@@ -1884,7 +1920,7 @@ void handleButtons() {
       motor_Naklon.setTarget(motor_Naklon.getCurrent());
       motorNaklonMoving = false;
       moveDirectionNaklon = 0;
-      disableDrivers();
+      releaseDrivers();
     }
   } else if (autoB) {
     if (canMoveY(1) && moveDirectionNaklon != 1) {
@@ -1908,7 +1944,7 @@ void handleButtons() {
     motor_Naklon.setTarget(motor_Naklon.getCurrent());
     motorNaklonMoving = false;
     moveDirectionNaklon = 0;
-    disableDrivers();
+    releaseDrivers();
   }
 
   // --- Поворот ---
@@ -1917,7 +1953,7 @@ void handleButtons() {
       motor_Povorot.setTarget(motor_Povorot.getCurrent());
       motorPovorotMoving = false;
       moveDirectionPovorot = 0;
-      disableDrivers();
+      releaseDrivers();
     }
   } else if (left) {
     if (moveDirectionPovorot != -1) {
@@ -1942,7 +1978,7 @@ void handleButtons() {
     motor_Povorot.reset();
     motorPovorotMoving = false;
     moveDirectionPovorot = 0;
-    disableDrivers();
+    releaseDrivers();
   }
 }
 
@@ -2491,7 +2527,7 @@ void handleApiManual() {
     motor_Povorot.brake();
     motor_Naklon.setTarget(motor_Naklon.getCurrent());
     motor_Povorot.setTarget(motor_Povorot.getCurrent());
-    disableDrivers();
+    releaseDrivers();
   }
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "text/plain; charset=utf-8", "OK");
@@ -3045,6 +3081,7 @@ void loadTmcSettings(TmcUartSettings &c, const char *x) {
   c.baud = prefs.getUInt((p + "baud").c_str(), c.baud);
   c.address = c.model == TmcModel::Tmc2208 ? 0 : prefs.getUChar((p + "addr").c_str(), c.address);
   c.rmsCurrent = prefs.getUInt((p + "rms").c_str(), c.rmsCurrent);
+  c.holdEnabled = prefs.getBool((p + "holdOn").c_str(), false);
   c.holdMultiplier = prefs.getFloat((p + "hold").c_str(), c.holdMultiplier);
   c.microsteps = prefs.getUInt((p + "micro").c_str(), c.microsteps);
   c.toff = prefs.getUChar((p + "toff").c_str(), c.toff);
@@ -3073,6 +3110,7 @@ void saveTmcSettings(const TmcUartSettings &c, const char *x) {
   prefs.putUInt((p + "baud").c_str(), c.baud);
   prefs.putUChar((p + "addr").c_str(), c.address);
   prefs.putUInt((p + "rms").c_str(), c.rmsCurrent);
+  prefs.putBool((p + "holdOn").c_str(), c.holdEnabled);
   prefs.putFloat((p + "hold").c_str(), c.holdMultiplier);
   prefs.putUInt((p + "micro").c_str(), c.microsteps);
   prefs.putUChar((p + "toff").c_str(), c.toff);
@@ -3216,7 +3254,16 @@ void handleUartSettingsSave() {
     return;
   }
   c.rmsCurrent = (uint16_t)rms;
-  c.holdMultiplier = constrain(server.arg("hold").toFloat(), 0.1f, 1.0f);
+  c.holdEnabled = server.hasArg("holdEnabled");
+  if (server.hasArg("holdPercent"))
+    c.holdMultiplier = constrain(server.arg("holdPercent").toFloat() / 100.0f, 0.1f, 1.0f);
+  else if (server.hasArg("hold")) c.holdMultiplier = constrain(server.arg("hold").toFloat(), 0.1f, 1.0f);
+  int32_t acceleration = pov ? POVOROT_ACCELERATION : NAKLON_ACCELERATION;
+  int32_t speed = pov ? POVOROT_MAX_SPEED : NAKLON_MAX_SPEED;
+  if ((server.hasArg(pov ? "pa" : "na") && !programInteger(server.arg(pov ? "pa" : "na").c_str(), acceleration, 1, 2000000000)) ||
+      (server.hasArg(pov ? "ps" : "ns") && !programInteger(server.arg(pov ? "ps" : "ns").c_str(), speed, 1, 2000000000))) {
+    server.send(422,"text/plain; charset=utf-8","Скорость и ускорение должны быть положительными целыми числами"); return;
+  }
   c.microsteps = (uint16_t)micro;
   c.toff = constrain(server.arg("toff").toInt(), 1, 15); // 0 отключает выходы драйвера!
   c.blankTime = (uint8_t)blank;
@@ -3253,6 +3300,16 @@ void handleUartSettingsSave() {
   saveTmcSettings(c, pov ? "tp" : "tn");
   if (pov && c.microsteps != uartPovorot.microsteps) zCalibrationInvalidate();
   (pov ? uartPovorot : uartNaklon) = c;
+  if (pov) {
+    POVOROT_ACCELERATION=acceleration; POVOROT_MAX_SPEED=speed;
+    prefs.putUInt("povAcc",acceleration); prefs.putUInt("povSpd",speed);
+    motor_Povorot.setAcceleration(acceleration); motor_Povorot.setMaxSpeed(speed);
+  } else {
+    NAKLON_ACCELERATION=acceleration; NAKLON_MAX_SPEED=speed;
+    prefs.putUInt("nakAcc",acceleration); prefs.putUInt("nakSpd",speed);
+    motor_Naklon.setAcceleration(acceleration); motor_Naklon.setMaxSpeed(speed);
+  }
+  releaseDrivers();
   reportTmcConnection(axis, pov ? "Z/POVOROT" : "Y/NAKLON", c);
   redirectHome();
 }
@@ -3808,6 +3865,55 @@ void handleNetworkStatus() {
 #include "web_api.h"
 #include "calibration_web.h"
 
+
+void stopMotorTest() {
+  motor_Naklon.brake(); motor_Povorot.brake();
+  motor_Naklon.setTarget(motor_Naklon.getCurrent());
+  motor_Povorot.setTarget(motor_Povorot.getCurrent());
+  motorNaklonMoving=motorPovorotMoving=false;
+  serialMoveNaklonActive=serialMovePovorotActive=false;
+  motorTestActive=false;
+  releaseDrivers();
+}
+void handleMotorTest() {
+  String action=server.arg("action");
+  if(action=="heartbeat") {
+    if(motorTestActive) motorTestHeartbeat=millis();
+  } else if(action=="stop") {
+    if(motorTestActive) stopMotorTest();
+  } else {
+    if(programRunning || homingActive || calibrationBusy() || zCalStarted || stepMotionPending() || rebootAt) {
+      server.send(409,"text/plain; charset=utf-8","Сначала остановите программу и все движения");return;
+    }
+    bool y=server.arg("motor")=="nak";
+    if(!y && server.arg("motor")!="pov") {server.send(422,"text/plain","UNKNOWN_MOTOR");return;}
+    int direction=action=="plus"?1:action=="minus"?-1:0;
+    if(!direction || (y && !canMoveY(direction))) {server.send(409,"text/plain; charset=utf-8","Проверьте направление и концевики Y");return;}
+    if(!(y ? tmcNaklon.settingsApplied : tmcPovorot.settingsApplied)) {
+      server.send(409,"text/plain; charset=utf-8","Сначала сохраните и подтвердите настройки UART");return;
+    }
+    auto &motor=y?motor_Naklon:motor_Povorot;
+    int64_t target=(int64_t)motor.getCurrent()+direction*1000000LL;
+    if(target>INT32_MAX || target<INT32_MIN) {server.send(422,"text/plain","STEP_RANGE");return;}
+    motorTestActive=true;motorTestHeartbeat=motorTestStarted=millis();
+    if(y) {moveDirectionNaklon=direction; motorNaklonMoving=true;}
+    else {moveDirectionPovorot=direction; motorPovorotMoving=true;}
+    enableDrivers(); motor.setTarget((int32_t)target);
+  }
+  server.send(200,"application/json","{\"ok\":true}");
+}
+void handleReboot() {
+  if (rebootAt) {server.send(200,"application/json","{\"ok\":true}");return;}
+  if(calibrationBusy()) calStopWithError("Калибровка прервана перезагрузкой");
+  if(zCalStarted) {zCalibrationStopMotion();zCalStarted=false;}
+  if(motorTestActive) stopMotorTest();
+  stopProgram();
+  disableDrivers();
+  if(!saveExecution()) {server.send(503,"text/plain; charset=utf-8","Не удалось сохранить состояние перед перезагрузкой; проверьте LittleFS");return;}
+  rebootAt=millis()+1000;
+  server.send(200,"application/json","{\"ok\":true}");
+}
+
 void setupWebServer() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/programs", HTTP_GET, handlePrograms);
@@ -3827,6 +3933,10 @@ void setupWebServer() {
                 String("{\"version\":\"") + REMUATOR_VERSION + "\"}");
   });
   server.on("/api/home", HTTP_GET, handleApiHome);
+  server.on("/api/reboot", HTTP_POST, handleReboot);
+  server.on("/api/motor-test", HTTP_POST, handleMotorTest);
+  server.on("/settings/serial", HTTP_GET, [](){sendLittleFSFile("/serial.html");});
+  server.on("/api/serial", HTTP_GET, [](){server.send(200,"text/plain; charset=utf-8",captureStartupSerial.load() ? "Запуск ещё выполняется. Нажмите Обновить после завершения." : startupSerial);});
   server.on("/api/settings", HTTP_GET, handleApiSettings);
   server.on("/api/settings/uart", HTTP_GET, handleApiUart);
   server.on("/api/settings/uart/diagnostics", HTTP_GET, handleApiUartDiagnostics);
@@ -4154,6 +4264,10 @@ void setup() {
   DBG(WEB_REQUEST_PERIOD_MS);
   DBGLN(" ms");
 
+  if(!yEndstopFault && !recoveryMotionUncertain) releaseDrivers();
+  portENTER_CRITICAL(&startupSerialMux);
+  captureStartupSerial = false;
+  portEXIT_CRITICAL(&startupSerialMux);
   // gpio_viewer.begin();
 }
 
@@ -4164,6 +4278,15 @@ void setup() {
 void loop() {
   {
     ControlGuard guard;
+    if(rebootAt) {
+      disableDrivers();
+      if((int32_t)(millis()-rebootAt)>=0) ESP.restart();
+      return;
+    }
+    if(motorTestActive && ((uint32_t)(millis()-motorTestHeartbeat)>2200 ||
+        (uint32_t)(millis()-motorTestStarted)>120000 ||
+        (!motor_Naklon.getState() && !motor_Povorot.getState()))) stopMotorTest();
+    if(normalDriverPower) releaseDrivers();
     // OTA is serviced only when the remuage program and BOTH motors are idle.
     // During upload, skip all mechanical processing; onStart disables motor drivers.
     if (otaServiceEnabled && !zCalStarted && !calibrationBusy() &&
@@ -4208,13 +4331,13 @@ void loop() {
       if (!homingActive && serialMoveNaklonActive &&
           motor_Naklon.getCurrent() == motor_Naklon.getTarget()) {
         serialMoveNaklonActive = false;
-        disableDrivers();
+        releaseDrivers();
       }
 
       if (serialMovePovorotActive && motor_Povorot.getCurrent() == motor_Povorot.getTarget()) {
         serialMovePovorotActive = false;
         motor_Povorot.reset();
-        disableDrivers();
+        releaseDrivers();
       }
     }
 

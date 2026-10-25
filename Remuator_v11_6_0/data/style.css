@@ -429,3 +429,10 @@ td + td {
 .z-steps {font-weight:700;font-size:clamp(2rem,6vw,3.8rem);font-variant-numeric:tabular-nums}
 .z-jog button {min-width:130px;touch-action:none;user-select:none}
 @media(max-width:650px){.inline-editor iframe{height:760px}.z-jog button{min-height:62px}}
+
+.selected-program {border:2px solid #23624a;background:#e6f2e9;}
+label.inactive {color:#888;opacity:.65;}
+input:disabled, select:disabled {background:#e3e3e3;color:#777;cursor:not-allowed;}
+.parameter-help {border-radius:50%;padding:0 .35em;margin:0 .3em;font-size:.8rem;cursor:help;}
+dialog {max-width:min(36rem,90vw);border:1px solid #aaa;border-radius:12px;}
+dialog::backdrop {background:#0006;}

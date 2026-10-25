@@ -43,3 +43,9 @@ for (const action of ["manualSet", "browserSet", "ntpSync"]) {
   });
 }
 load().catch(showError);
+
+$("reboot").onclick = async () => {
+  if (!confirm("Остановить контроллер и перезагрузить его?")) return;
+  try { await request("/api/reboot", {action:"reboot"}); status("Контроллер остановлен. Перезагрузка…"); setTimeout(()=>location.reload(),7000); }
+  catch(e) { showError(e); }
+};

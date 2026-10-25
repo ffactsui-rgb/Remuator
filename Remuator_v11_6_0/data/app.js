@@ -36,7 +36,19 @@ export const duration = (seconds) => {
 export const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 export const epoch = () => String(Math.floor(Date.now() / 1000));
 export function showError(error) {
-  $("error").textContent = error.message || error;
+  const message = String(error?.message || error);
+  const help = /fetch|network|сеть|Load failed/i.test(message)
+    ? "Проверьте питание контроллера и подключение к его Wi-Fi, откройте страницу по текущему IP и повторите запрос. После перезагрузки дождитесь запуска контроллера."
+    : /UART|IFCNT|IOIN/i.test(message)
+    ? "Проверьте питание VIO/VMOT, общий GND, UART GPIO21/47 и разные аппаратные адреса драйверов."
+    : /движ|BUSY|RUNNING/i.test(message)
+    ? "Остановите движение или дождитесь его завершения и повторите действие."
+    : /калибр|ADXL|горизонт/i.test(message)
+    ? "Откройте настройки калибровки, проверьте датчик и используйте сохранённую таблицу либо выполните измерение."
+    : /файл|LittleFS|CSV|HTTP|ответ/i.test(message)
+    ? "Проверьте файл и свободное место в файловом менеджере; убедитесь, что прошивка и веб-файлы одной версии."
+    : "Проверьте введённые значения и состояние контроллера, затем повторите действие.";
+  $("error").textContent = message + " Как исправить: " + help;
   $("error").hidden = false;
 }
 export function clearError() {
@@ -88,6 +100,8 @@ export function bindForm(form, after) {
     event.preventDefault();
     clearError();
     const data = new URLSearchParams(new FormData(form));
+    for (const input of form.querySelectorAll('[data-mode-disabled="1"]'))
+      if (input.type !== "checkbox" || input.checked) data.set(input.name, input.value);
     const fieldset = form.querySelector("fieldset");
     if (fieldset) fieldset.disabled = true;
     status("Сохранение…");
@@ -123,7 +137,7 @@ export function programCards(data, full = false) {
     data.programs
       .map(
         (p) =>
-          `<article class="card"><h2>${escape(p.name)}</h2><p><code>${escape(p.path)}</code></p><p>${p.count} шагов · ${duration(p.seconds)} ${p.path === data.selectedPath ? "· ✓ Выбрана" : ""}</p>${p.warning ? `<p class="warning">${escape(p.warning)}</p>` : ""}<div class="toolbar"><button data-select="${escape(p.path)}" ${data.running ? "disabled" : ""}>Выбрать</button>${full ? `<button class="danger" data-restore="${escape(p.path)}" ${data.running ? "disabled" : ""}>Восстановить шаблон</button>` : ""}</div></article>`,
+          `<article class="card ${p.path === data.selectedPath ? "selected-program" : ""}"><h2>${escape(p.name)}</h2><p><code>${escape(p.path)}</code></p><p>${p.count} шагов · ${duration(p.seconds)} ${p.path === data.selectedPath ? "· ✓ Выбрана" : ""}</p>${p.warning ? `<p class="warning">${escape(p.warning)}</p>` : ""}<div class="toolbar"><button data-select="${escape(p.path)}" ${data.running ? "disabled" : ""}>Выбрать</button>${full ? `<button class="danger" data-restore="${escape(p.path)}" ${data.running ? "disabled" : ""}>Восстановить шаблон</button>` : ""}</div></article>`,
       )
       .join("") +
     data.invalid

@@ -1,10 +1,11 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Калибровка Z — Remuage-VRN</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css">
-<script type="module" src="/calibration-z.js"></script><script src="/site-shell.js" defer></script></head><body>
+<script type="module" src="/calibration-z.js"></script><script src="/site-shell.js" defer></script><script type="module" src="/parameter-help.js"></script></head><body>
 <header id="siteHeader"></header><main>
 <h1>Калибровка Z — полный оборот 360°</h1>
-<nav class="settings-tabs" aria-label="Разделы настроек"><a href="/settings">Основные</a><a href="/settings/calibration-y">Калибровка Y</a><a href="/settings/calibration-z" aria-current="page">Калибровка Z</a><a href="/settings/uart">UART / TMC</a><a href="/settings/about">О программе</a></nav>
+<nav class="settings-tabs" aria-label="Разделы настроек"><a href="/settings">Основные</a><a href="/settings/calibration-y">Калибровка Y</a><a href="/settings/calibration-z" aria-current="page">Калибровка Z</a><a href="/settings/uart">Настройки TMC</a><a href="/settings/serial">Serial</a>
+        <a href="/settings/about">О программе</a></nav>
 <div id="error" role="alert" hidden></div>
 <section class="card"><h2>1. Микрошаг драйвера Z (TMC2209)</h2>
 <p>Это тот же параметр, что на странице UART / TMC. Изменение вступает в силу только после подтверждения записи по UART и сбрасывает калибровку Z.</p>

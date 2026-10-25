@@ -22,6 +22,7 @@ async function refresh() {
     $("start").disabled=busy || !d.present || !d.xOk;
     $("rememberX").disabled=busy || !d.present;
     $("axesField").disabled=busy;
+    $("useCalibration").disabled=busy || !d.saved?.length;
     $("save").disabled=d.phase!=="review" || d.rawCount<25;
     if(d.phase==="review" && d.measuredMin!==null && !$("minAngle").dataset.edited)
       $("minAngle").value=Math.min(40,Math.max(0,Math.round(d.measuredMin)));
@@ -48,3 +49,5 @@ $("saveForm").addEventListener("submit",async(e)=>{
   e.preventDefault();await action({action:"save",minAngle:$("minAngle").value});
 });
 refresh();setInterval(refresh,1000);
+
+$("useCalibration").onclick=()=>action({action:"use"});

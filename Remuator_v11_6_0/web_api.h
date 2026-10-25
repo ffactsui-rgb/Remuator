@@ -123,6 +123,8 @@ void handleApiHome() {
       String((long long)(programRunning ? execState.lastCompletedEpoch : 0)) + ",\"nextStep\":" +
       String(programRunning && currentProgramStep + 1 < runProgram.count ? currentProgramStep + 2
                                                                          : 0) +
+      ",\"actualY\":" + (calAdxlPresent && calLastOkMs && (uint32_t)(millis()-calLastOkMs)<3000 && isfinite(calAngle) ? String(calAngle,2) : String("null")) +
+      ",\"targetY\":" + String(stepsToAngleNaklon(motor_Naklon.getTarget()),2) +
       ",\"poseY\":" + String(stepsToAngleNaklon(motor_Naklon.getCurrent()), 2) +
       ",\"poseRotation\":" +
       String((double)motor_Povorot.getCurrent() * 360.0 / currentZSteps360(), 2) + ",\"programs\":[";
@@ -193,6 +195,7 @@ inline String tmcJson(const TmcUartSettings &c) {
   String json =
       "{\"model\":" + String((uint16_t)c.model) + ",\"address\":" + String(c.address) +
       ",\"rms\":" + String(c.rmsCurrent) + ",\"hold\":" + String(c.holdMultiplier, 2) +
+      ",\"holdEnabled\":" + jsonBool(c.holdEnabled) + ",\"holdPercent\":" + String(c.holdMultiplier*100,0) +
       ",\"micro\":" + String(c.microsteps) + ",\"toff\":" + String(c.toff) +
       ",\"blank\":" + String(c.blankTime) + ",\"hend\":" + String(c.hysteresisEnd) +
       ",\"hstart\":" + String(c.hysteresisStart) + ",\"pwmo\":" + String(c.pwmOfs) +
@@ -208,6 +211,8 @@ inline String tmcJson(const TmcUartSettings &c) {
 void handleApiUart() {
   server.send(200, "application/json; charset=utf-8",
               "{\"ok\":true,\"version\":" + editorJsonQuote(REMUATOR_VERSION) +
+                  ",\"na\":" + String(NAKLON_ACCELERATION) + ",\"ns\":" + String(NAKLON_MAX_SPEED) +
+                  ",\"pa\":" + String(POVOROT_ACCELERATION) + ",\"ps\":" + String(POVOROT_MAX_SPEED) +
                   ",\"baud\":" + String(uartNaklon.baud) +
                   ",\"nak\":" + tmcJson(uartNaklon) + ",\"pov\":" + tmcJson(uartPovorot) +
                   ",\"nakConnected\":" + jsonBool(tmcNaklon.connected) + ",\"povConnected\":" +

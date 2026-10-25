@@ -50,13 +50,12 @@ function renderSync(data) {
   $("syncStatus").textContent = text;
 }
 function renderPose(data) {
-  $("posePanel").hidden = !data.running;
-  if (!data.running) return;
+  $("posePanel").hidden = false;
   const y = Number(data.poseY),
     r = Number(data.poseRotation),
     orientation = ((r % 360) + 360) % 360;
   if (!Number.isFinite(y) || !Number.isFinite(r)) return;
-  $("tiltValue").textContent = number(y) + "°";
+  $("tiltValue").textContent = number(data.targetY ?? y) + "° · реальный: " + (data.actualY === null || data.actualY === undefined ? "нет данных" : number(data.actualY) + "°");
   $("rotationValue").textContent = number(orientation) + "°";
   $("bottleTilt").setAttribute("transform", `rotate(${-y} 65 170)`);
   const radians = (y * Math.PI) / 180,
@@ -65,7 +64,7 @@ function renderPose(data) {
   $("tiltArc").setAttribute("d", `M111 170 A46 46 0 0 0 ${x} ${endY}`);
   $("bottleRotation").setAttribute(
     "transform",
-    `rotate(${orientation} 130 100)`,
+    `rotate(${orientation + 180} 130 100)`,
   );
   $("poseNote").textContent =
     "Положение по сохранённым счётчикам шагов. Суммарный поворот: " +
@@ -202,7 +201,7 @@ function render(data) {
           <tr class="${row.skipped ? "skipped" : row.number === data.currentStep ? "current" : row.number < data.currentStep ? "done" : ""}">
             <td>${row.number}${row.skipped ? " · пропущен" : ""}</td><td>${row.skipped ? "—" : dateSeconds(row.start)}</td><td>${signed(row.incY)}</td><td>${number(row.y)}</td>
             <td>${mark(row.naklonDone, "Наклон", row.number)}</td><td>${signed(row.incRot)}</td><td>${signed(row.rot)}</td>
-            <td>${number(row.orientation)}</td><td>${mark(row.rotationDone, "Поворот", row.number)}</td><td>${escape(row.pause)}</td>
+            <td><svg width="36" height="36" viewBox="0 0 40 40" aria-label="Положение Z"><circle cx="20" cy="20" r="16" fill="#dcece1" stroke="#23624a"/><path d="M20 35 V25" stroke="#23624a" stroke-width="3" transform="rotate(${row.orientation} 20 20)"/></svg>${number(row.orientation)}</td><td>${mark(row.rotationDone, "Поворот", row.number)}</td><td>${escape(row.pause)}</td>
           </tr>`,
           )
           .join("")}

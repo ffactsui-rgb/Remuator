@@ -25,7 +25,7 @@
     $("status").className = bad ? "error" : "";
   }
   function showError(text, path = "") {
-    $("error").replaceChildren(document.createTextNode(text));
+    $("error").replaceChildren(document.createTextNode(text + " Как исправить: " + (/fetch|network|Load failed/i.test(String(text)) ? "Проверьте питание контроллера, Wi-Fi и текущий IP, затем повторите запрос." : "Проверьте значения в таблице и ответ контроллера; при занятости дождитесь остановки и повторите действие.")));
     if (path) {
       let a = document.createElement("a");
       a.textContent = " Открыть текущий черновик";
@@ -127,7 +127,7 @@
     return (
       '<span class="bottle"><svg viewBox="0 0 40 40" role="img" aria-label="Поворот ' +
       a +
-      ' градусов"><circle cx="20" cy="20" r="16" fill="#dcece1" stroke="#23624a" stroke-width="2"/><line x1="20" y1="5" x2="20" y2="15" stroke="#23624a" stroke-width="3" stroke-linecap="round" transform="rotate(' +
+      ' градусов"><circle cx="20" cy="20" r="16" fill="#dcece1" stroke="#23624a" stroke-width="2"/><line x1="20" y1="35" x2="20" y2="25" stroke="#23624a" stroke-width="3" stroke-linecap="round" transform="rotate(' +
       a +
       ' 20 20)"/><circle cx="20" cy="20" r="2" fill="#23624a"/></svg><small>' +
       number(a) +

@@ -223,6 +223,31 @@ bool calLoadFile(CalBlob &dst) {
   f.close(); if(!calValidate(b)) return false;
   dst=b; return true;
 }
+// The X reference has its own checked, atomically replaced backup.
+bool calSaveXFile() {
+  File f=LittleFS.open("/calibration_x.tmp","w");
+  if(!f) return false;
+  f.printf("CAL_X_V1,%u,%u,%.6f,%.6f,%u\n",(unsigned)calYAxis,(unsigned)calXAxis,
+      (double)calRefX,(double)calToleranceX,calXStored?1u:0u);
+  f.flush();f.close();
+  File check=LittleFS.open("/calibration_x.tmp","r");
+  String line=check.readStringUntil('\n');check.close();
+  unsigned y,x,on;float ref,tol;
+  if(sscanf(line.c_str(),"CAL_X_V1,%u,%u,%f,%f,%u",&y,&x,&ref,&tol,&on)!=5 ||
+     y!=calYAxis || x!=calXAxis || on!=(calXStored?1u:0u) ||
+     !isfinite(ref) || fabsf(ref-calRefX)>0.00001f || fabsf(tol-calToleranceX)>0.00001f) return false;
+  return LittleFS.rename("/calibration_x.tmp","/calibration_x.csv");
+}
+bool calLoadXFile() {
+  File f=LittleFS.open("/calibration_x.csv","r");if(!f)return false;
+  String line=f.readStringUntil('\n');f.close();
+  unsigned y,x,on;float ref,tol;
+  if(sscanf(line.c_str(),"CAL_X_V1,%u,%u,%f,%f,%u",&y,&x,&ref,&tol,&on)!=5 ||
+     y>2 || x>2 || x==y || on>1 || !isfinite(ref) || fabsf(ref)>180 ||
+     !isfinite(tol) || tol<0.2f || tol>15) return false;
+  calYAxis=y;calXAxis=x;calRefX=ref;calToleranceX=tol;calXStored=on;
+  return true;
+}
 void calibrationInit() {
   calYAxis=(uint8_t)constrain(prefs.getUChar("calYaxis",1),0,2);
   calXAxis=(uint8_t)constrain(prefs.getUChar("calXaxis",0),0,2);
@@ -230,6 +255,7 @@ void calibrationInit() {
   calToleranceX=constrain(prefs.getFloat("calXtol",2.0f),0.2f,15.0f);
   calXStored=prefs.getBool("calXset",false);
   calRefX=prefs.getFloat("calXref",0.0f);
+  calLoadXFile(); // Restore valid saved axes/reference without repeating calibration.
   calTableValid=false;
   if(prefs.getBytesLength("yCalBlob")==sizeof(CalBlob) &&
      prefs.getBytes("yCalBlob",&calActive,sizeof(CalBlob))==sizeof(CalBlob) && calValidate(calActive))
@@ -238,6 +264,7 @@ void calibrationInit() {
     calTableValid=true; prefs.putBytes("yCalBlob",&calActive,sizeof(CalBlob));
   }
   if(calTableValid && (calActive.yAxis!=calYAxis || calActive.xAxis!=calXAxis)) calTableValid=false;
+  if(calXStored && !LittleFS.exists("/calibration_x.csv")) calSaveXFile();
   Wire.beginTransmission(CAL_ADXL_ADDR);
   if(Wire.endTransmission()==0 && calWriteReg(0x31,0x08) && // FULL_RES, +/-2g
      calWriteReg(0x2C,0x09) && // 50 Hz output data rate

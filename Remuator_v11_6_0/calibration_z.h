@@ -18,7 +18,7 @@ void zCalibrationStopMotion() {
   zCalDirection = 0;
   motorPovorotMoving = false;
   serialMovePovorotActive = false;
-  disableDrivers();
+  releaseDrivers();
   zCalStepSnapshot.store(motor_Povorot.getCurrent(), std::memory_order_relaxed);
 }
 void zCalibrationService() {
@@ -27,7 +27,7 @@ void zCalibrationService() {
     if (motorPovorotMoving && !motor_Povorot.getState() &&
         motor_Povorot.getCurrent() == motor_Povorot.getTarget()) {
       motorPovorotMoving=false;
-      disableDrivers();
+      releaseDrivers();
     }
     // A failed nudge must also stop after the same timeout.
     if (motorPovorotMoving && (uint32_t)(millis()-zCalJogAt)>Z_CAL_DEADMAN_MS)

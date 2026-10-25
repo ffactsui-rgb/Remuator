@@ -39,7 +39,7 @@ struct Motor {
   void complete(){current=target;active=false;}
 } motor_Naklon,motor_Povorot;
 bool drivers=false;
-void enableDrivers(){drivers=true;} void disableDrivers(){drivers=false;}
+void enableDrivers(){drivers=true;} void disableDrivers(){drivers=false;} void releaseDrivers(){drivers=false;}
 void oledMarkDirty(){}
 // Native controller tests assume an already calibrated, level machine;
 // sensor and calibration persistence have their own dedicated tests.

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/style.css" />
     <script type="module" src="/uart.js"></script>
     <script src="/site-shell.js" defer></script>
-  </head>
+  <script type="module" src="/parameter-help.js"></script></head>
   <body>
     <header id="siteHeader"></header>
     <main>
@@ -17,7 +17,8 @@
         <a href="/settings">Основные</a>
         <a href="/settings/calibration-y">Калибровка Y</a>
         <a href="/settings/calibration-z">Калибровка Z</a>
-        <a href="/settings/uart" aria-current="page">UART / TMC</a>
+        <a href="/settings/uart" aria-current="page">Настройки TMC</a>
+        <a href="/settings/serial">Serial</a>
         <a href="/settings/about">О программе</a>
       </nav>
 
@@ -114,7 +115,21 @@
             <h2 id="nakHeading">Наклон Y</h2>
             <p id="nakConnection" role="status"></p>
             <input type="hidden" name="motor" value="nak" />
-            <div class="fields">
+            <div class="fields"><label
+              >Ускорение наклона, шаг/с²<input
+                name="na"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label
+              >Скорость наклона, шаг/с<input
+                name="ns"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label><input type="checkbox" name="holdEnabled"> Использовать удержание мотором</label>
               <label
                 >Ток RMS, мА<input
                   name="rms"
@@ -124,12 +139,12 @@
                   step="1"
                   required /></label
               ><label
-                >Множитель удержания<input
-                  name="hold"
+                >Ток удержания, %<input
+                  name="holdPercent"
                   type="number"
-                  min="0.1"
-                  max="1"
-                  step="0.01"
+                  min="10"
+                  max="100"
+                  step="1"
                   required /></label
               ><label
                 >Микрошаги<select name="micro">
@@ -252,7 +267,7 @@
               >
             </div>
             <button type="button" class="button" data-torque-profile>Заполнить профиль «Момент/скорость»</button>
-            <button class="primary">Сохранить двигатель</button>
+            <button class="primary">Сохранить двигатель</button><p>Для проверки применяются введённые параметры после сохранения и подтверждения UART. Удерживайте кнопку движения; отпускание останавливает мотор.</p><div class="toolbar"><button type="button" data-test="minus">Тест −</button><button type="button" data-test="plus">Тест +</button><button type="button" data-test="stop">Стоп</button></div>
           </fieldset>
         </form>
         <form id="pov" class="card" action="/settings/uart/save">
@@ -260,7 +275,21 @@
             <h2 id="povHeading">Поворот Z</h2>
             <p id="povConnection" role="status"></p>
             <input type="hidden" name="motor" value="pov" />
-            <div class="fields">
+            <div class="fields"><label
+              >Ускорение поворота, шаг/с²<input
+                name="pa"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label
+              >Скорость поворота, шаг/с<input
+                name="ps"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label><input type="checkbox" name="holdEnabled"> Использовать удержание мотором</label>
               <label
                 >Ток RMS, мА<input
                   name="rms"
@@ -270,12 +299,12 @@
                   step="1"
                   required /></label
               ><label
-                >Множитель удержания<input
-                  name="hold"
+                >Ток удержания, %<input
+                  name="holdPercent"
                   type="number"
-                  min="0.1"
-                  max="1"
-                  step="0.01"
+                  min="10"
+                  max="100"
+                  step="1"
                   required /></label
               ><label
                 >Микрошаги<select name="micro">
@@ -398,7 +427,7 @@
               >
             </div>
             <button type="button" class="button" data-torque-profile>Заполнить профиль «Момент/скорость»</button>
-            <button class="primary">Сохранить двигатель</button>
+            <button class="primary">Сохранить двигатель</button><p>Для проверки применяются введённые параметры после сохранения и подтверждения UART. Удерживайте кнопку движения; отпускание останавливает мотор.</p><div class="toolbar"><button type="button" data-test="minus">Тест −</button><button type="button" data-test="plus">Тест +</button><button type="button" data-test="stop">Стоп</button></div>
           </fieldset>
         </form>
       </div>

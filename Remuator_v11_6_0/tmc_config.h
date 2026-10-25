@@ -30,6 +30,7 @@ struct TmcUartSettings {
   bool internalRsense = false;
   bool multistepFilter = false;
   uint8_t sendDelay = 2;
+  bool holdEnabled = false;
 };
 
 inline uint16_t tmcMaxRms(TmcModel model) { return model == TmcModel::Tmc2208 ? 1400 : 2000; }

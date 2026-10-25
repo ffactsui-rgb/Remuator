@@ -10,6 +10,7 @@ function updateTopology() {
     const model = bus.elements[axis + "Model"].value;
     const address = bus.elements[axis + "Addr"];
     address.disabled = model === "2208";
+    address.closest("label").classList.toggle("inactive", address.disabled);
     if (address.disabled) address.value = "0";
     $(axis + "AddressHint").textContent =
       model === "2208"
@@ -42,7 +43,7 @@ async function load() {
     ["pov", "Поворот Z"],
   ]) {
     const config = data[axis];
-    populate($(axis), config);
+    populate($(axis), {...config, na:data.na, ns:data.ns, pa:data.pa, ps:data.ps});
     $(axis).elements.rms.max = config.model === 2208 ? "1400" : "2000";
     $(axis + "Heading").textContent =
       `${label} · TMC${config.model} · адрес ${config.address}`;
@@ -57,12 +58,13 @@ async function load() {
         : `UART ответил, но применение параметров НЕ подтверждено (IFCNT ${accepted}/${sent}).`;
   }
   updateTopology();
+  updateModes();
 }
 
 // Заполняем стартовый профиль только по нажатию; отправка и применение
 // выполняются отдельной кнопкой «Сохранить двигатель» при остановленных осях.
 const torqueProfile = {
-  rms: 900, hold: 0.5, micro: 16, toff: 5, blank: 24,
+  rms: 900, holdPercent: 50, micro: 16, toff: 5, blank: 24,
   hend: 0, hstart: 4, pwmo: 36, pwmgrad: 14, pwmfreq: 1,
   pwmreg: 8, pwmlim: 12, freewheel: 0, delay: 2,
   stealth: false, autoscale: true, autograd: false, intpol: true,
@@ -72,6 +74,7 @@ for (const axis of ["nak", "pov"]) {
   const form = $(axis);
   form.querySelector("[data-torque-profile]").addEventListener("click", () => {
     populate(form, torqueProfile);
+    updateModes();
     $("status").textContent =
       "Профиль введён для оси " + (axis === "nak" ? "Y" : "Z") +
       ". Проверьте ток NEMA17 и нажмите «Сохранить двигатель».";
@@ -108,5 +111,66 @@ $("uartDiagnostics").addEventListener("click", async () => {
     await load();
   } catch (error) {
     out.textContent = "Ошибка диагностики: " + (error?.message || error);
+    showError(error);
   } finally { button.disabled = false; }
 });
+
+function updateModes() {
+  for (const axis of ["nak", "pov"]) {
+    const form = $(axis), e = form.elements;
+    const stealth = e.stealth.checked, automatic = e.autoscale.checked;
+    for (const input of form.querySelectorAll("input[name],select[name]")) {
+      const name = input.name;
+      const disabled =
+        (["pwmo", "pwmgrad", "pwmfreq", "pwmreg", "pwmlim", "autoscale", "autograd"].includes(name) && !stealth) ||
+        (["hend", "hstart"].includes(name) && stealth) ||
+        (["pwmreg", "pwmlim", "autograd"].includes(name) && !automatic) ||
+        (name === "pwmgrad" && e.autograd.checked && automatic) ||
+        (name === "holdPercent" && !e.holdEnabled.checked) ||
+        (name === "rms" && e.iscale.checked) ||
+        (name === "freewheel" && (!stealth || !e.holdEnabled.checked || Number(e.holdPercent.value) > 0));
+      input.disabled = disabled;
+      input.dataset.modeDisabled = disabled ? "1" : "0";
+      input.closest("label")?.classList.toggle("inactive", disabled);
+    }
+  }
+}
+for (const axis of ["nak", "pov"]) $(axis).addEventListener("change", updateModes);
+
+// Preserve values of inactive fields when saving; the values remain available
+// if the operator later switches to the mode that uses them.
+function motorData(form) {
+  const data = new URLSearchParams();
+  for (const e of form.querySelectorAll("input[name],select[name]"))
+    if (e.type !== "checkbox" || e.checked) data.set(e.name, e.value);
+  return data;
+}
+let testHeld = false, testTimer = 0, testQueue = Promise.resolve();
+function stopTest() {
+  if (!testHeld) return;
+  testHeld = false; clearInterval(testTimer);
+  testQueue = testQueue.catch(()=>{}).then(()=>request("/api/motor-test", {action:"stop"})).catch(showError);
+}
+for (const button of document.querySelectorAll("[data-test]")) {
+  button.addEventListener("pointerdown", event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    if (button.dataset.test === "stop") { stopTest(); return; }
+    if (testHeld) return;
+    const form = button.closest("form");
+    // Disabled mode-specific inputs are validated by the controller as well.
+    if (!form.reportValidity()) return;
+    testHeld = true; button.setPointerCapture(event.pointerId);
+    testQueue = testQueue.catch(()=>{}).then(async()=>{
+      await request(form.action, motorData(form));
+      if (!testHeld) return;
+      await request("/api/motor-test", {motor:form.id, action:button.dataset.test});
+      if (!testHeld) {await request("/api/motor-test",{action:"stop"});return;}
+      testTimer = setInterval(()=>request("/api/motor-test", {action:"heartbeat"}).catch(e=>{stopTest();showError(e);}),500);
+    }).catch(e=>{stopTest();showError(e);});
+  });
+  for (const name of ["pointerup","pointercancel","lostpointercapture"]) button.addEventListener(name, stopTest);
+  button.addEventListener("contextmenu", e=>e.preventDefault());
+}
+window.addEventListener("blur", stopTest);
+document.addEventListener("visibilitychange",()=>{if(document.hidden)stopTest();});

@@ -18,8 +18,8 @@ assert 'GStepper<STEPPER2WIRE> motor_Povorot(200, Z_STEP_PIN, Z_DIR_PIN);' in in
 assert 'constexpr bool HARDWARE_BUTTONS_ENABLED = false;' in ino
 assert 'motor_Naklon.getCurrent() != motor_Naklon.getTarget()' in ino
 assert 'motor_Povorot.getCurrent() != motor_Povorot.getTarget()' in ino
-assert '#define DBG(x) do { if (serialOutputEnabled && !stepMotionPending()) Serial.print(x); } while (0)' in ino
-assert '#define DBGLN(x) do { if (serialOutputEnabled && !stepMotionPending()) Serial.println(x); } while (0)' in ino
+assert '#define DBG(x) do { if (!stepMotionPending()) { captureStartup(x); if (serialOutputEnabled) Serial.print(x); } } while (0)' in ino
+assert re.search(r'#define DBGLN\(x\) do \{ if \(!stepMotionPending\(\)\) \{ captureStartup\(x\);.*if \(serialOutputEnabled\) Serial.println\(x\);', ino)
 assert 'if (serialOutputEnabled && !zCalStarted && !stepMotionPending())\n      handleSerial();' in ino
 assert 'if (!stepMotionPending()) delay(1);' in ino
 assert 'if (!stepMotionPending()) {\n      pollTimeSync();\n      serviceRtcClock();' in ino

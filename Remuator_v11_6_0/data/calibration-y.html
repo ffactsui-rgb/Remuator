@@ -6,7 +6,7 @@
   <link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css">
   <script type="module" src="/calibration-y.js"></script>
   <script src="/site-shell.js" defer></script>
-  </head>
+  <script type="module" src="/parameter-help.js"></script></head>
 <body>
   <header id="siteHeader"></header>
   <main>
@@ -15,7 +15,8 @@
         <a href="/settings">Основные</a>
         <a href="/settings/calibration-y" aria-current="page">Калибровка Y</a>
         <a href="/settings/calibration-z">Калибровка Z</a>
-        <a href="/settings/uart">UART / TMC</a>
+        <a href="/settings/uart">Настройки TMC</a>
+        <a href="/settings/serial">Serial</a>
         <a href="/settings/about">О программе</a>
       </nav>
 
@@ -68,7 +69,7 @@
       <form id="saveForm"><label>Исправленный минимальный угол, ° <input id="minAngle" name="minAngle" type="number" min="0" max="40" step="1" required value="23"></label>
         <button id="save" class="primary" type="submit" disabled>Пересчитать и записать калибровку</button></form>
       <p>После сохранения таблица хранится в NVS и в файле <code>/calibration_y.csv</code>.</p>
-      <h3>Текущая сохранённая таблица</h3>
+      <h3>Текущая сохранённая таблица</h3><button id="useCalibration" type="button">Использовать эту калибровку</button>
       <div class="table-scroll"><table><thead><tr><th>Угол Y, °</th><th>Шаги от нижнего концевика</th></tr></thead><tbody id="savedRows"><tr><td colspan="2">Калибровка ещё не сохранена</td></tr></tbody></table></div>
     </section>
     <p id="status" role="status"></p>

@@ -104,6 +104,19 @@ int main(){
  assert(LittleFS.files.count("/calibration_y.csv"));
  assert(calLoadFile(calProposal));
 
+ // X file round trip and restart with valid saved X/Y must not demand recalibration.
+ assert(calSaveXFile());
+ const float reference=calRefX;
+ calXStored=false;calRefX=91;
+ assert(calLoadXFile());assert(calXStored && fabsf(calRefX-reference)<0.00001f);
+ calTableValid=false;calXStored=false;
+ calibrationInit();assert(calibrationValid());assert(calXStored);assert(calibrationRunReady());
+ auto goodX=LittleFS.files["/calibration_x.csv"];
+ LittleFS.files["/calibration_x.csv"]="CAL_X_V1,1,1,0,2,1\n";
+ assert(!calLoadXFile());
+ LittleFS.files["/calibration_x.csv"]="CAL_X_V1,1,0,nan,2,1\n";
+ assert(!calLoadXFile());
+ LittleFS.files["/calibration_x.csv"]=goodX;
  calActive.crc^=1;assert(!calValidate(calActive));
  std::cout<<"PASS CALIBRATION HEADER UNIT TEST"<<std::endl;
 }
