@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Управление программой — Remuage-VRN</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/home.js"></script>
+    <script src="/site-shell.js" defer></script>
+  </head>
+  <body>
+    <header id="siteHeader"></header>
+    <main>
+        <div class="clock-panel">
+          <span class="label">Текущее время контроллера</span
+          ><strong id="clock">—</strong
+          ><span id="syncStatus" class="muted"></span>
+        </div>
+      <h1>Управление программой</h1>
+      <div id="error" role="alert" hidden></div>
+      <div id="calibrationNotice" class="warning" hidden role="alert">
+        <strong>Требуется калибровка осей или проверка горизонта X</strong>
+        <p id="calibrationNoticeText"></p>
+        <a class="button" href="/settings/calibration-y">Калибровка Y</a> <a class="button" href="/settings/calibration-z">Калибровка Z</a>
+      </div>
+      <section class="card">
+        <div class="spread">
+          <h2 id="programName">Загрузка…</h2>
+          <span id="state" class="badge"></span>
+        </div>
+        <p id="executionMessage"></p>
+        <dl id="programSummary" class="program-summary">
+          <div><dt>Общее время работы</dt><dd id="selectedDuration">—</dd></div>
+          <div><dt>Количество шагов</dt><dd id="selectedCount">—</dd></div>
+          <div><dt>Окончание при старте сейчас</dt><dd id="selectedFinish">—</dd></div>
+        </dl>
+        <div class="toolbar">
+          <button id="start" class="primary" disabled>▶ Пуск программы</button
+          ><button id="pause" hidden>Пауза</button
+          ><button id="resume" hidden>Продолжить</button
+          ><button id="stop" class="danger" hidden>■ Стоп</button
+          ><a class="button" href="/programs">Выбрать программу</a
+          >
+        </div>
+        <div id="startAtPanel" class="start-at-panel">
+          <label for="startStep">Номер первого выполняемого шага</label>
+          <input id="startStep" type="number" min="1" step="1" value="1" inputmode="numeric" />
+          <button id="startAt" type="button">▶ Запустить с выбранного шага</button>
+          <small>Предыдущие шаги пропускаются. Текущее положение Z считается положением после предыдущего шага.</small>
+        </div>
+        <div id="executionNotice" class="notice" hidden>
+          <p id="noticeText"></p>
+          <button id="dismissNotice">Стереть</button>
+        </div>
+        <p id="recoveryStatus" class="notice" hidden role="status"></p>
+        <p id="rangeWarning" class="warning" hidden></p>
+        <dl id="runTimeline" class="run-timeline" hidden>
+          <div>
+            <dt>Начало программы</dt>
+            <dd id="startedAt">—</dd>
+          </div>
+          <div>
+            <dt>Текущий шаг</dt>
+            <dd id="completedStep">—</dd>
+            <dd id="currentChecks" class="operation-checks"></dd>
+            <dd id="currentPhase" class="muted"></dd>
+          </div>
+          <div>
+            <dt>Предстоящий шаг</dt>
+            <dd id="upcomingStep">—</dd>
+            <dd id="upcomingAction" class="muted"></dd>
+          </div>
+          <div>
+            <dt id="finishLabel">Ожидаемое окончание</dt>
+            <dd id="endsAt">—</dd>
+          </div>
+        </dl>
+      <section id="manualPanel" class="card">
+        <h2>Ручное управление</h2>
+        <p class="muted">
+          Держите кнопку для движения. POWER: короткое нажатие — обнулить
+          координаты, длительное — пуск / стоп.
+        </p>
+        <p class="muted">
+          «В начало»: сначала Y до концевика 23°, затем Z к запомненному нулю по кратчайшему пути.
+          Каждое движение ограничено временем 180 секунд. GPIO14 — 23°, GPIO13 — 85°.
+          Концевики NC на землю; Z возвращается по счётчику шагов без концевика.
+        </p>
+        <p id="endstops" class="muted" aria-live="polite"></p>
+        <div class="toolbar">
+          <button id="homeY">В начало</button
+          ><button id="stopManual" class="danger">
+            Остановить ручное движение
+          </button>
+        </div>
+        <div class="manual">
+          <button data-manual="tilt_up">▲ Наклон +</button
+          ><button data-manual="tilt_down">▼ Наклон −</button
+          ><button data-manual="rotate_left">◀ Поворот</button
+          ><button id="power" class="primary">⏻ POWER</button
+          ><button data-manual="rotate_right">Поворот ▶</button>
+        </div>
+      </section>
+        <section
+          id="posePanel"
+          class="pose-grid"
+          hidden
+          aria-label="Положение бутылки"
+        >
+          <figure>
+            <figcaption>
+              Наклон Y от горизонтали <strong id="tiltValue">—</strong>
+            </figcaption>
+            <svg
+              viewBox="0 0 300 190"
+              role="img"
+              aria-label="Наклон бутылки от горизонтального нуля"
+            >
+              <path
+                d="M45 170 H270 M65 185 V10"
+                stroke="#b5c6be"
+                stroke-width="1.5"
+                stroke-dasharray="5 5"
+                fill="none"
+              />
+              <text x="260" y="187" class="axis-label">0°</text>
+              <text x="70" y="26" class="axis-label">90°</text>
+              <path
+                id="tiltArc"
+                fill="none"
+                stroke="#d0963e"
+                stroke-width="3"
+              />
+              <g id="bottleTilt" transform="rotate(-23 65 170)">
+                <g transform="translate(293 25) scale(-1 1)">
+                  <path
+                    d="M75 129 H167 Q180 129 186 137 H220 V153 H186 Q180 161 167 161 H75 Q65 161 65 151 V139 Q65 129 75 129Z"
+                    fill="#257653"
+                    stroke="#174e39"
+                    stroke-width="2"
+                  />
+                  <rect
+                    x="110"
+                    y="131"
+                    width="42"
+                    height="28"
+                    rx="3"
+                    fill="#f3e7bd"
+                  />
+                  <path
+                    d="M217 135 H228 V155 H217"
+                    fill="#bb9d58"
+                    stroke="#7c6735"
+                    stroke-width="2"
+                  />
+                  <path
+                    d="M81 135 H160"
+                    stroke="#70a98b"
+                    stroke-width="3"
+                    stroke-linecap="round"
+                  />
+                </g>
+              </g>
+              <circle cx="65" cy="170" r="4" fill="#163e34" />
+            </svg>
+          </figure>
+          <figure>
+            <figcaption>
+              Поворот от исходного нуля <strong id="rotationValue">—</strong>
+            </figcaption>
+            <svg
+              viewBox="0 0 260 190"
+              role="img"
+              aria-label="Поворот бутылки от нуля, вид вдоль оси"
+            >
+              <circle
+                cx="130"
+                cy="100"
+                r="68"
+                fill="#f1f7f3"
+                stroke="#c3d5c9"
+                stroke-width="2"
+              />
+              <path
+                d="M130 24 V176 M54 100 H206"
+                stroke="#b5c6be"
+                stroke-dasharray="4 5"
+              />
+              <text x="139" y="23" class="axis-label">180°</text>
+              <text x="207" y="105" class="axis-label">270°</text>
+              <text x="138" y="187" class="axis-label">0°</text>
+              <text x="15" y="105" class="axis-label">90°</text>
+              <g id="bottleRotation">
+                <circle
+                  cx="130"
+                  cy="100"
+                  r="51"
+                  fill="#dcece1"
+                  stroke="#23624a"
+                  stroke-width="3"
+                />
+                <circle
+                  cx="130"
+                  cy="100"
+                  r="31"
+                  fill="#eef3d8"
+                  stroke="#9fb69c"
+                />
+                <path
+                  d="M130 49 V84"
+                  stroke="#ca8b2b"
+                  stroke-width="7"
+                  stroke-linecap="round"
+                />
+                <circle cx="130" cy="100" r="5" fill="#23624a" />
+              </g>
+            </svg>
+          </figure>
+          <p class="muted pose-note" id="poseNote">
+            Положение по счётчикам шагов. Нулевой поворот фиксируется при
+            запуске.
+          </p>
+        </section>
+        <div id="schedule"></div>
+      </section>
+      <section id="inlineEditor" class="card inline-editor" hidden>
+        <h2>Редактирование выбранной программы</h2>
+        <p class="muted">Изменения редактируются здесь. Нажмите «Сохранить файл», чтобы записать CSV; черновик используется при запуске.</p>
+        <iframe id="editorFrame" title="Редактор выбранной программы" loading="eager"></iframe>
+      </section>
+      <section id="programList" class="grid"></section>
+      <p id="status" role="status" aria-live="polite"></p>
+</main>
+    <footer id="siteFooter"></footer>
+  </body>
+</html>
