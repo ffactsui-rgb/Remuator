@@ -1,0 +1,12 @@
+# Remuator | ESP32-S3-WROOM-1 N16R8 | Flash 16 MiB
+# Arduino IDE uploads the application to 0x10000 on ESP32-S3.
+# APP0 MUST start at 0x10000 for normal USB Upload to boot.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xE000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x400000,
+app1,     app,  ota_1,   0x410000, 0x400000,
+spiffs,   data, spiffs,  0x810000, 0x100000,
+coredump, data, coredump,0x910000, 0x10000,
+# Reserve: 0x920000..0xFFFFFF (6.875 MiB) for later expansion.
+# LittleFS stays at 1 MiB until explicitly enlarged by the user.
