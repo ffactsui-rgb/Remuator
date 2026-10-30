@@ -1,0 +1,144 @@
+void postBus(const char *y, const char *ya, const char *z, const char *za) {
+  server.args = {{"motor", "bus"}, {"baud", "115200"}, {"nakModel", y}, {"povModel", z}};
+  if (ya)
+    server.args["nakAddr"] = ya;
+  if (za)
+    server.args["povAddr"] = za;
+  server.code = 0;
+  handleUartSettingsSave();
+}
+void postMotor(const char *axis, const char *rms = "900", const char *micro = "16",
+               const char *blank = "24") {
+  server.args = {{"motor", axis},     {"rms", rms},       {"hold", "0.5"},  {"micro", micro},
+                 {"blank", blank},    {"hend", "2"},      {"hstart", "4"},  {"toff", "4"},
+                 {"pwmo", "36"},      {"pwmgrad", "14"},  {"pwmfreq", "1"}, {"pwmreg", "8"},
+                 {"pwmlim", "12"},    {"freewheel", "0"}, {"delay", "2"},   {"stealth", "on"},
+                 {"autoscale", "on"}, {"intpol", "on"}};
+  server.code = 0;
+  handleUartSettingsSave();
+}
+int main() {
+  initTMC();
+  assert(tmcNaklon.connected && tmcPovorot.connected);
+  assert(tmcNaklon.version == 0x21 && tmcPovorot.version == 0x21);
+  for (const auto &w : writes)
+    if (w.reg == "TCOOLTHRS" || w.reg == "COOLCONF")
+      assert(w.address == 0 || w.address == 1);
+  // Отклонённая топология не должна менять UART или сохранённые настройки.
+  size_t before = writes.size();
+  auto saved = prefs.values;
+  postBus("2208", "0", "2209", "0");
+  assert(server.code == 400);
+  postBus("2208", "2", "2209", "1");
+  assert(server.code == 400);
+  postBus("2208", nullptr, "2208", nullptr);
+  assert(server.code == 400);
+  postBus("2208", nullptr, "2209", "4");
+  assert(server.code == 400);
+  postBus("2208", nullptr, "2209", nullptr);
+  assert(server.code == 400);
+  postBus("2208", nullptr, "garbage", "1");
+  assert(server.code == 400);
+  postBus("2208", nullptr, "2209", "1oops");
+  assert(server.code == 400);
+  assert(writes.size() == before && prefs.values == saved);
+  wireVersion[0] = 0x20; // Теперь на Y физически установлен TMC2208, а не TMC2209.
+  for (int a = 1; a <= 3; ++a) {
+    auto addr = std::to_string(a);
+    postBus("2208", nullptr, "2209", addr.c_str());
+    assert(server.code == 200 && uartPovorot.address == a && tmcPovorot.connected);
+  }
+  // Одновременная смена обеих пар модель/адрес и проверка второго TMC2209.
+  wireVersion[0] = 0x20;
+  wireVersion[2] = 0x21;
+  postBus("2209", "2", "2208", nullptr);
+  assert(server.code == 200 && tmcNaklon.connected && tmcPovorot.connected);
+  TmcUartSettings loadedY{}, loadedZ{};
+  loadTmcSettings(loadedY, "tn");
+  loadTmcSettings(loadedZ, "tp");
+  assert(loadedY.model == TmcModel::Tmc2209 && loadedY.address == 2);
+  assert(loadedZ.model == TmcModel::Tmc2208 && loadedZ.address == 0);
+  wireVersion[0] = 0x21;
+  postBus("2209", "2", "2209", "0");
+  assert(server.code == 200 && tmcPovorot.connected);
+  // Несовпадение версии отображается как ошибка UART, а не как успех.
+  wireVersion[0] = 0x20;
+  reportTmcConnection(tmcPovorot, "Z", uartPovorot);
+  assert(!tmcPovorot.connected);
+  // Неподдерживаемые значения регистров и превышение тока модели отклоняются.
+  wireVersion[0] = 0x20;
+  postBus("2209", "2", "2208", nullptr);
+  assert(server.code == 200);
+  before = writes.size();
+  postMotor("pov", "1401");
+  assert(server.code == 400);
+  postMotor("nak", "2001");
+  assert(server.code == 400);
+  postMotor("nak", "900", "3");
+  assert(server.code == 400);
+  postMotor("nak", "900", "16", "20");
+  assert(server.code == 400);
+  assert(writes.size() == before);
+  postMotor("pov", "900", "32", "54");
+  assert(server.code == 200 && uartPovorot.microsteps == 32 && uartPovorot.blankTime == 54);
+  loadTmcSettings(loadedZ, "tp");
+  assert(loadedZ.microsteps == 32 && loadedZ.blankTime == 54);
+  postMotor("nak", "1800");
+  assert(server.code == 200); // Допустимо для TMC2209, но не для TMC2208.
+  postBus("2208", nullptr, "2209", "1");
+  assert(server.code == 400);
+  // Без UART нельзя сообщать об успешном сохранении или менять NVS.
+  auto goodPrefs = prefs.values;
+  auto currentY = uartNaklon;
+  wireVersion[currentY.address] = 0;  // Драйвер отключён либо установлен неверный аппаратный адрес.
+  postMotor("nak");
+  assert(server.code == 503 && prefs.values == goodPrefs);
+  assert(uartNaklon.rmsCurrent == currentY.rmsCurrent);
+  wireVersion[currentY.address] = 0x21;
+  // Корректный IOIN при неизменном IFCNT выявляет ошибку передачи записей.
+  dropWrites[currentY.address] = true;
+  postMotor("nak");
+  assert(server.code == 503 && prefs.values == goodPrefs);
+  dropWrites[currentY.address] = false;
+  postMotor("nak");
+  assert(server.code == 200 && tmcNaklon.settingsApplied);
+  // Удержание, процент тока и параметры движения каждой оси сохраняются совместно.
+  server.args["holdEnabled"]="on";server.args["holdPercent"]="37";
+  server.args["na"]="1234";server.args["ns"]="5678";
+  handleUartSettingsSave();
+  assert(server.code==200 && uartNaklon.holdEnabled);
+  assert(std::abs(uartNaklon.holdMultiplier-0.37f)<0.001f);
+  assert(NAKLON_ACCELERATION==1234 && NAKLON_MAX_SPEED==5678);
+  assert(motor_Naklon.acceleration==1234 && motor_Naklon.speed==5678);
+  loadTmcSettings(loadedY,"tn");
+  assert(loadedY.holdEnabled && std::abs(loadedY.holdMultiplier-0.37f)<0.001f);
+  before=writes.size();saved=prefs.values;
+  server.args["ns"]="oops";handleUartSettingsSave();
+  assert(server.code==422 && writes.size()==before && prefs.values==saved);
+  server.args["ns"]="5678";server.args.erase("holdEnabled");handleUartSettingsSave();
+  assert(server.code==200 && !uartNaklon.holdEnabled);
+  // Отказ файловой системы откатывает параметры и не меняет резервные настройки NVS.
+  saved=prefs.values;auto oldY=uartNaklon;fileSaveOK=false;postMotor("nak","1000");
+  assert(server.code==507 && prefs.values==saved && uartNaklon.rmsCurrent==oldY.rmsCurrent);
+  fileSaveOK=true;
+  // Программа, включая паузу, и ручное движение любой оси запрещают перенастройку.
+  before = writes.size();
+  saved = prefs.values;
+  programRunning = true;
+  postBus("2209", "3", "2208", nullptr);
+  assert(server.code == 409);
+  postMotor("nak");
+  assert(server.code == 409);
+  programRunning = false;
+  motor_Povorot.active = true;
+  postBus("2209", "3", "2208", nullptr);
+  assert(server.code == 409);
+  motor_Povorot.active = false;
+  motorNaklonMoving = true;
+  postMotor("nak");
+  assert(server.code == 409);
+  assert(writes.size() == before && prefs.values == saved);
+  std::cout << "PASS: actual UART handlers, models/addresses, both driver classes, 2209-only "
+               "registers, IOIN diagnostics, rejection before mutation, preference round trip, RMS "
+               "and discrete register limits, motion guards.\n";
+}

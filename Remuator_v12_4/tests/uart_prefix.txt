@@ -1,0 +1,83 @@
+#include <cassert>
+#include <map>
+#include <iostream>
+#include <type_traits>
+#include "program_model.h"
+#include "tmc_axis.h"
+struct String : std::string {
+  using std::string::string;
+  String() = default;
+  String(const std::string &s) : std::string(s) {}
+  template<class T, typename std::enable_if<std::is_arithmetic<T>::value, int>::type=0>
+  String(T n) : std::string(std::to_string(n)) {}
+  long toInt() const {
+    try {
+      return std::stol(*this);
+    } catch (...) {
+      return 0;
+    }
+  }
+  float toFloat() const {
+    try {
+      return std::stof(*this);
+    } catch (...) {
+      return 0;
+    }
+  }
+};
+struct Preferences {
+  std::map<std::string, double> values;
+#define PREF(name, type)                                                                           \
+  type get##name(const char *k, type d) { return values.count(k) ? type(values[k]) : d; }          \
+  size_t put##name(const char *k, type v) {                                                        \
+    values[k] = v;                                                                                 \
+    return sizeof(v);                                                                              \
+  }
+  PREF(UInt, uint32_t)
+  PREF(UChar, uint8_t) PREF(Char, int8_t) PREF(UShort, uint16_t) PREF(Float, float) PREF(Bool, bool)
+#undef PREF
+} prefs;
+struct Server {
+  std::map<std::string, std::string> args;
+  int code = 0;
+  String response;
+  bool hasArg(const char *k) { return args.count(k); }
+  String arg(const char *k) { return args[k]; }
+  void send(int c, const char *, const String &r) {
+    code = c;
+    response = r;
+  }
+} server;
+struct Motor {
+  bool active = false;
+  int32_t acceleration=0, speed=0;
+  void setAcceleration(int32_t n) {acceleration=n;}
+  void setMaxSpeed(int32_t n) {speed=n;}
+  bool getState() { return active; }
+} motor_Naklon, motor_Povorot;
+bool programRunning = false, motorNaklonMoving = false, motorPovorotMoving = false;
+void redirectHome() { server.send(200, "text/plain", "OK"); }
+void disableDrivers() {}
+void releaseDrivers() {}
+uint32_t NAKLON_ACCELERATION=10000,POVOROT_ACCELERATION=10000,NAKLON_MAX_SPEED=5000,POVOROT_MAX_SPEED=5000;
+void delay(int) {}
+#define DBGLN(x)                                                                                   \
+  do {                                                                                             \
+  } while (0)
+constexpr uint32_t TMC_DEFAULT_BAUD = 115200;
+constexpr uint8_t TMC_UART_RX = 47, TMC_UART_TX = 21;
+constexpr int SERIAL_8N1 = 0;
+Stream TmcSerial;
+TmcUartSettings uartNaklon{TmcModel::Tmc2209, 0}, uartPovorot{TmcModel::Tmc2209, 1};
+TmcAxis tmcNaklon, tmcPovorot;
+template <class T, class L, class H> T constrain(T x, L lo, H hi) {
+  return x < lo ? T(lo) : x > hi ? T(hi) : x;
+}
+
+void zCalibrationInvalidate() {prefs.putBool("zCalValid",false);}
+
+bool zCalStarted = false;
+bool calibrationBusy() { return false; }
+
+bool fileSaveOK=true;unsigned fileSaves=0;
+bool persistTmcFile(const TmcUartSettings&,const TmcUartSettings&,uint32_t,uint32_t,uint32_t,uint32_t){++fileSaves;return fileSaveOK;}
