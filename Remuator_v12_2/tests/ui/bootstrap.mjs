@@ -1,0 +1,43 @@
+import {JSDOM} from 'jsdom';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const root=new URL('../../',import.meta.url).pathname;
+const header=readFileSync(root+'bootstrap_pages.h','utf8');
+const page=name=>header.split(`static const char ${name}[] PROGMEM = R"BOOTPAGE(`)[1].split(')BOOTPAGE";')[0];
+const wait=()=>new Promise(r=>setTimeout(r,30));
+let state={webReady:false,fsMounted:true,staConnected:false,sta:'',ap:'192.168.4.1',missing:['/index.html','/home.js']};
+const calls=[];
+const wifi=page('BOOTSTRAP_WIFI_HTML').replace('location.assign(managerUrl());','window.__redirect=managerUrl();').replace("location.replace('/');","window.__redirect='/';");
+const dom=new JSDOM(wifi,{url:'http://192.168.4.1/setup',runScripts:'dangerously',beforeParse(w){w.fetch=async(url,opts)=>{
+ calls.push([url,opts]);
+ if(url==='/setup/wifi'){state={...state,staConnected:true,sta:'192.168.1.25'};return {ok:true};}
+ return {ok:true,json:async()=>state};
+};}});
+await wait();
+assert.equal(dom.window.document.getElementById('missing').children.length,2);
+assert(!dom.window.document.querySelector('script[src],link[href]'));
+const form=dom.window.document.getElementById('wifiForm');form.elements.ssid.value='Home';form.elements.pass.value='abcdefgh';
+form.dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));await wait();
+const posted=calls.find(([u])=>u==='/setup/wifi');assert(posted);assert.equal(posted[1].body.get('ssid'),'Home');assert.equal(posted[1].body.get('pass'),'abcdefgh');
+assert.equal(form.elements.pass.value,'');assert.equal(dom.window.__redirect,'http://192.168.4.1:8080/bootstrap');
+assert.equal(dom.window.document.querySelector('#address a').href,'http://192.168.1.25:8080/bootstrap');
+dom.window.close();
+let uploaded=false;const managerCalls=[];
+const manager=new JSDOM(page('BOOTSTRAP_MANAGER_HTML'),{url:'http://192.168.1.25:8080/bootstrap',runScripts:'dangerously',beforeParse(w){w.fetch=async(url,opts)=>{
+ managerCalls.push([url,opts]);
+ const data=String(url).startsWith('/api/list')?{entries:[],used:0,total:1048576}:url==='/api/version'?{version:'12.1'}:{webReady:uploaded,fsMounted:true,missing:uploaded?[]:['/index.html']};
+ if(String(url).startsWith('/api/upload'))uploaded=true;
+ return {ok:true,json:async()=>data,text:async()=>'File uploaded'};
+};}});
+await wait();const doc=manager.window.document;
+assert(!doc.querySelector('script[src],link[href]'));
+assert.match(doc.getElementById('bootstrapState').textContent,/index.html/);
+assert(doc.getElementById('bootstrapMain').hidden);
+Object.defineProperty(doc.getElementById('files'),'files',{value:[new manager.window.File(['test'],'index.html',{type:'text/html'})]});
+doc.getElementById('button-upload').click();await wait();
+assert(managerCalls.some(([u,opts])=>u==='/api/upload?dir=%2F'&&opts.method==='POST'));
+doc.getElementById('bootstrapCheck').click();await wait();
+assert(!doc.getElementById('bootstrapMain').hidden);assert.equal(doc.getElementById('bootstrapMain').href,'http://192.168.1.25/');
+assert(managerCalls.every(([u])=>String(u).startsWith('/')));
+manager.window.close();
+console.log('PASS: self-contained memory pages, Wi-Fi save/password clearing, AP/STA manager handoff, empty-FS listing/upload and completion link');
