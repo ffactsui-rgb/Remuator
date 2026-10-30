@@ -1,0 +1,27 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Первое подключение — Remuage-VRN</title><style>body{font:17px system-ui;background:#edf3ef;color:#183b2e;margin:0;padding:20px}main{max-width:650px;margin:24px auto;background:white;padding:26px;border-radius:16px}label{display:block;margin:16px 0}input,button,a.button{box-sizing:border-box;font:inherit;padding:12px;border-radius:8px;border:1px solid #a7bbae}input{display:block;width:100%;margin-top:6px}button,a.button{display:inline-block;background:#23624a;color:white;cursor:pointer;text-decoration:none}button:disabled{opacity:.5}p{line-height:1.5}.error{color:#a52c24}code{overflow-wrap:anywhere}ul{max-height:200px;overflow:auto}[hidden]{display:none!important}</style></head><body><main><h1>Первое подключение</h1><p>Веб-файлы контроллера ещё не загружены. Эта страница встроена в прошивку и работает без LittleFS.</p><p id="state" role="status">Проверка сети…</p><p id="error" role="alert" class="error" hidden></p><form id="wifiForm" action="/setup/wifi" method="post"><label>Название сети Wi-Fi (SSID)<input name="ssid" maxlength="32" autocomplete="off" required></label><label>Пароль Wi-Fi<input name="pass" type="password" maxlength="64" autocomplete="new-password"><small>Оставьте пустым для открытой сети.</small></label><input type="hidden" name="homeen" value="1"><button id="connect">Сохранить и подключиться</button></form><p id="address"></p><a id="manager" class="button" hidden>Открыть встроенный файловый менеджер</a><p>Точка доступа контроллера остаётся включённой. При заводских настройках: сеть <strong>RemuageVRN</strong>, пароль <strong>43214321</strong>, адрес <code>http://192.168.4.1/</code>.</p><p>После подключения контроллера к Wi-Fi откроется встроенный файловый менеджер. Для него используются прежние логин и пароль.</p><details><summary>Какие файлы отсутствуют</summary><ul id="missing"></ul></details></main><script>
+(() => {
+  const $=id=>document.getElementById(id);
+  let redirected=false,submittedAt=0;
+  const managerUrl=(host=location.hostname)=>{const u=new URL(location.href);u.hostname=host;u.port='8080';u.pathname='/bootstrap';u.search='';u.hash='';return u.href;};
+  async function poll(){
+    try{
+      const r=await fetch('/setup/status',{cache:'no-store'});if(!r.ok)throw Error(await r.text());const d=await r.json();
+      $('missing').replaceChildren(...d.missing.map(name=>{const li=document.createElement('li');li.textContent=name;return li;}));
+      $('manager').href=managerUrl();$('manager').hidden=false;
+      if(d.webReady){location.replace('/');return;}
+      $('state').textContent=!d.fsMounted?'LittleFS не смонтирована. Проверьте таблицу разделов и состояние памяти; существующие данные не стирались.':d.staConnected?'Контроллер подключён к Wi-Fi. Переход к файловому менеджеру…':submittedAt&&Date.now()-submittedAt>30000?'Подключение пока не удалось: проверьте SSID и пароль, диапазон 2,4 ГГц и доступность сети.':'Задайте Wi-Fi 2,4 ГГц. Точка доступа контроллера продолжает работать.';
+      if(d.staConnected){
+        const a=document.createElement('a');a.href=managerUrl(d.sta);a.textContent='Адрес менеджера в домашней сети: '+a.href;$('address').replaceChildren(a);
+        if(!redirected){redirected=true;location.assign(managerUrl());}
+      }
+    }catch(e){$('error').textContent=String(e.message||e)+' Как исправить: проверьте питание и подключение к Wi-Fi контроллера, затем обновите страницу.';$('error').hidden=false;}
+  }
+  $('wifiForm').addEventListener('submit',async e=>{
+    e.preventDefault();$('connect').disabled=true;$('error').hidden=true;
+    try{const r=await fetch('/setup/wifi',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(new FormData(e.target))});if(!r.ok)throw Error(await r.text());$('wifiForm').elements.pass.value='';submittedAt=Date.now();$('state').textContent='Настройки сохранены. Ожидается подключение к сети…';await poll();}
+    catch(e){$('error').textContent=String(e.message||e)+' Проверьте название сети и пароль и повторите подключение.';$('error').hidden=false;}
+    finally{$('connect').disabled=false;}
+  });
+  poll();setInterval(poll,2500);
+})();
+</script></body></html>
