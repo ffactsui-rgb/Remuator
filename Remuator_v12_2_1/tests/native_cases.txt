@@ -1,0 +1,69 @@
+void fresh() {
+  LittleFS=FakeFS{};prefs.blobs.clear();
+  executionJournal.~CheckedJournal();new(&executionJournal) CheckedJournal<ExecutionFileStorage,ExecutionRecord>(executionStorage);
+  calAdxlPresent=true;programTiltSamplingActive=false;calAngle=23;calLastOkMs=1;recoveryCountdownStarted=false;
+  mono=0;wall=1800000000;validClock=true;motor_Naklon={};motor_Povorot={};
+  runMeta={};execState={};recoveryAutoPending=recoveryRequired=recoveryMotionUncertain=false;
+  executionReadError=executionJournalDegraded=homingActive=homingZPhase=pauseStopPending=false;zHomeCalibrated=true;
+  programRunning=programPaused=serialMoveNaklonActive=serialMovePovorotActive=false;
+  motorNaklonMoving=motorPovorotMoving=endstopYActive=endstopUpperActive=yEndstopFault=false;
+  lowerPin=upperPin=LOW;lowerEndstop={};upperEndstop={};
+  programState=IDLE;currentProgramStep=0;programs.clear();
+  RemuageProgram p={};std::string error;
+  assert(parseProgramCsv("Step;incAngle;Angle;IncRot;Rot;Pause\n1;7;;1;;00:00:30\n2;1;;-1;;00:00:30\n3;-1;;0;;00:00:30\n",p,error));
+  strcpy(p.name,"Test");programs.push_back(p);startProgram();assert(programRunning);
+}
+void rebootAt(int64_t epoch) {
+  mono=0;wall=epoch;motor_Naklon={};motor_Povorot={};
+  programRunning=programPaused=false;serialMoveNaklonActive=serialMovePovorotActive=false;
+  recoveryRequired=recoveryAutoPending=recoveryMotionUncertain=false;
+  executionReadError=false;executionMessage="";
+  restoreExecutionAfterBoot();
+}
+void finishAxes() {
+  motor_Naklon.complete();calAngle=stepsToAngleNaklon(motor_Naklon.current);calLastOkMs=millis();executeProgram();
+  advance(1);executeProgram();executeProgram();
+  motor_Povorot.complete();advance(6);executeProgram();
+}
+int main(){
+  // Одного достижения цели STEP недостаточно для отметки Y.
+  fresh();motor_Naklon.complete();executeProgram();assert(!execState.naklonCompleted);
+  calAngle=stepsToAngleNaklon(motor_Naklon.current);calLastOkMs=millis();executeProgram();assert(execState.naklonCompleted);
+  advance(1);executeProgram();executeProgram();assert(programState==MOVING_POVOROT);
+  motor_Povorot.complete();advance(5);executeProgram();assert(!execState.povorotCompleted);
+  advance(1);executeProgram();assert(execState.povorotCompleted);
+  // Сбой питания во время Z: записанная команда принимается выполненной и повторно не выдаётся.
+  fresh();motor_Naklon.complete();calAngle=stepsToAngleNaklon(motor_Naklon.current);executeProgram();advance(1);executeProgram();executeProgram();
+  const auto zTarget=motor_Povorot.target;assert(programState==MOVING_POVOROT);
+  rebootAt(1800000005);assert(programRunning&&execState.povorotCompleted&&!recoveryMotionUncertain);
+  serviceRecovery();assert(!programPaused&&motor_Povorot.commands==0&&motor_Povorot.current==zTarget);
+  assert(scheduledEpoch[1]==1800000030);
+  // Один переход в фазу Z ещё не является выдачей команды: поворот должен быть выполнен один раз.
+  fresh();motor_Naklon.complete();calAngle=stepsToAngleNaklon(motor_Naklon.current);executeProgram();advance(1);executeProgram();
+  assert(programState==MOVING_POVOROT&&!serialMovePovorotActive);
+  rebootAt(1800000005);assert(!execState.povorotCompleted);serviceRecovery();assert(serialMovePovorotActive&&motor_Povorot.commands==1);
+  // Прерванный ход Y продолжается по измерению; сохранённый счётчик не считается достоверным.
+  fresh();calAngle=26;rebootAt(1800000005);serviceRecovery();assert(!programPaused&&!recoveryRequired);
+  assert(!execState.naklonCompleted&&programState==MOVING_NAKLON);
+  // Пропущено несколько сроков: выдержать 2 с, выполнить первую незавершённую строку и пересчитать остальные.
+  fresh();finishAxes();rebootAt(1800001000);serviceRecovery();assert(programPaused&&recoveryAutoPending);
+  advance(1);serviceRecovery();assert(programPaused);
+  advance(1);serviceRecovery();assert(!programPaused&&currentProgramStep==1);
+  assert(scheduledEpoch[1]==1800001002&&scheduledEpoch[2]==1800001032&&scheduledEpoch[3]==1800001062);
+  // Повторный сбой во время отсчёта не превращает автоматическое восстановление в ручную паузу.
+  fresh();finishAxes();rebootAt(1800001000);serviceRecovery();rebootAt(1800001001);assert(recoveryAutoPending);
+  // Нет ускоренного выполнения просроченных шагов; без датчика восстановление блокируется без требования перекалибровки.
+  fresh();calAdxlPresent=false;rebootAt(1800000005);serviceRecovery();assert(programPaused&&recoveryRequired);
+  calAdxlPresent=true;serviceRecovery();assert(!programPaused);
+  fresh();pauseProgram();rebootAt(1800000005);serviceRecovery();assert(programPaused&&!recoveryAutoPending);
+  // При разрыве или повреждении последней записи используется целая резервная запись.
+  fresh();finishAxes();assert(saveExecution());auto slot=executionJournal.lastSlot();
+  const char*path=slot==0?"/state/execution-a.bin":"/state/execution-b.bin";
+  if(LittleFS.files.count(path)&&!LittleFS.files[path].empty())LittleFS.files[path][0]^=1;
+  rebootAt(1800000005);assert(!executionReadError);
+  // Слишком малое изменение угла относительно команды не подтверждает выполнение.
+  fresh();motor_Naklon.complete();calAngle=24;calLastOkMs=millis();executeProgram();assert(!execState.naklonCompleted);
+  // Явный выбор стартовой строки использует сохранённую калибровку.
+  fresh();stopProgram();startProgram(2);assert(programRunning&&currentProgramStep==1&&scheduledEpoch[0]==0);
+  std::cout<<"PASS: measured Y, 6-second Z, accepted interrupted Z, measured interrupted Y, preserved deadlines, 2-second overdue re-anchor, manual pause and journal fallback\n";
+}
