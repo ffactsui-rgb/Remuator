@@ -1,0 +1,51 @@
+#pragma once
+#include <cstdint>
+#include <string>
+#include <vector>
+struct Stream {
+  unsigned baud = 0;
+  void begin(unsigned b, int, int, int) { baud = b; }
+  void updateBaudRate(unsigned b) { baud = b; }
+  void flush() {}
+};
+inline uint8_t wireVersion[4] = {0x21, 0x21, 0x21, 0x21};
+inline uint8_t wireIFCNT[4] = {};
+// Имитация драйвера, подтверждающего часть записей, но не все.
+inline bool dropWrites[4] = {};
+struct TmcWrite { uint8_t address; std::string reg; double value; };
+inline std::vector<TmcWrite> writes;
+class TMC2208Stepper {
+public:
+  uint8_t address = 0;
+  bool chip2209 = false;
+  bool CRCerror = false;
+  uint16_t bytesWritten = 0;
+  TMC2208Stepper(Stream *, float) {}
+  bool wireOK() const { return wireVersion[address] == (chip2209 ? 0x21 : 0x20); }
+  void record(const char *reg, double v) {
+    writes.push_back({address, reg, v});
+    bytesWritten += 8;
+    if (wireOK() && !dropWrites[address]) ++wireIFCNT[address];
+  }
+  void begin() { record("begin", 0); }
+  uint8_t version() { CRCerror = !wireOK(); return wireOK() ? wireVersion[address] : 0; }
+  uint32_t IOIN() { CRCerror = !wireOK(); return wireOK() ? (uint32_t(wireVersion[address]) << 24) | ((address & 3) << 2) : 0; }
+  uint8_t IFCNT() { CRCerror = !wireOK(); return wireOK() ? wireIFCNT[address] : 0; }
+#define REG(name) template <class T> void name(T v) { record(#name, double(v)); }
+  REG(senddelay)
+  REG(pdn_disable) REG(mstep_reg_select) REG(I_scale_analog) REG(internal_Rsense)
+  REG(hold_multiplier) REG(rms_current) REG(microsteps) REG(toff) REG(blank_time)
+  REG(hysteresis_end) REG(hysteresis_start) REG(en_spreadCycle) REG(pwm_autoscale)
+  REG(pwm_autograd) REG(pwm_ofs) REG(pwm_grad) REG(pwm_freq) REG(pwm_reg)
+  REG(pwm_lim) REG(freewheel) REG(intpol) REG(multistep_filt) REG(VACTUAL)
+protected:
+  TMC2208Stepper(Stream *, float, uint8_t a) : address(a) {}
+};
+class TMC2209Stepper : public TMC2208Stepper {
+public:
+  TMC2209Stepper(Stream *s, float r, uint8_t a) : TMC2208Stepper(s,r,a) { chip2209 = true; }
+  uint8_t version() { return TMC2208Stepper::version(); }
+  uint32_t IOIN() { return TMC2208Stepper::IOIN(); }
+  REG(TCOOLTHRS) REG(COOLCONF)
+};
+#undef REG

@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UART / TMC2208 / TMC2209 — Remuage-VRN</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/uart.js"></script>
+    <script src="/site-shell.js" defer></script>
+  <script type="module" src="/parameter-help.js"></script></head>
+  <body>
+    <header id="siteHeader"></header>
+    <main>
+      <h1>UART / TMC2208 / TMC2209</h1>
+      <nav class="settings-tabs" aria-label="Разделы настроек">
+        <a href="/settings">Основные</a>
+        <a href="/settings/calibration-y">Калибровка Y</a>
+        <a href="/settings/calibration-z">Калибровка Z</a>
+        <a href="/settings/uart" aria-current="page">Настройки TMC</a>
+        <a href="/settings/serial">Serial</a>
+        <a href="/settings/about">О программе</a>
+      </nav>
+
+      <div id="error" role="alert" hidden></div>
+      <section class="card">
+        <h2>Фактическая проверка UART</h2>
+        <p>Проверяет IOIN и IFCNT каждого драйвера и ищет TMC2209 по адресам 1–3.
+           Работает только после полной остановки. Адрес 0 не сканируется:
+           он зарезервирован для TMC2208 и два ответа могут конфликтовать.</p>
+        <button id="uartDiagnostics" type="button">Проверить связь и адреса</button>
+        <pre id="uartDiagnosticsResult" style="white-space:pre-wrap" role="status">Диагностика ещё не запущена.</pre>
+      </section>
+      <form id="bus" action="/settings/uart/save" class="card">
+        <fieldset disabled>
+          <h2>Общая шина UART</h2>
+          <p>
+            TX GPIO21, RX GPIO47. Выберите установленные драйверы и адреса,
+            соответствующие перемычкам. По умолчанию для новой платы: Y — TMC2208 (адрес 0), Z — TMC2209 (адрес 1).
+            Настройки применяются при остановленной программе и двигателях.
+          </p>
+          <div class="fields">
+            <label
+              >Драйвер наклона Y<select name="nakModel">
+                <option value="2208">TMC2208</option>
+                <option value="2209">TMC2209</option>
+              </select></label
+            >
+            <label
+              >Адрес Y<select name="nakAddr">
+                <option value="0">0 · MS1=0, MS2=0</option>
+                <option value="1">1 · MS1=1, MS2=0</option>
+                <option value="2">2 · MS1=0, MS2=1</option>
+                <option value="3">3 · MS1=1, MS2=1</option>
+              </select></label
+            >
+            <label
+              >Драйвер поворота Z<select name="povModel">
+                <option value="2208">TMC2208</option>
+                <option value="2209">TMC2209</option>
+              </select></label
+            >
+            <label
+              >Адрес Z<select name="povAddr">
+                <option value="0">0 · MS1=0, MS2=0</option>
+                <option value="1">1 · MS1=1, MS2=0</option>
+                <option value="2">2 · MS1=0, MS2=1</option>
+                <option value="3">3 · MS1=1, MS2=1</option>
+              </select></label
+            >
+          </div>
+          <p id="nakAddressHint" class="muted"></p>
+          <p id="povAddressHint" class="muted"></p>
+          <p class="muted">
+            TMC2208: адрес всегда 0; MS1/MS2 не выбирают UART-адрес. TMC2209:
+            адрес = MS1 + 2×MS2; 0 — GND, 1 — 3,3 В. Изменение здесь не
+            переставляет физические перемычки. На общей шине адреса должны
+            различаться.
+          </p>
+          <p id="busConflict" role="alert" hidden></p>
+          <input type="hidden" name="motor" value="bus" /><label
+            >Скорость UART, бод<input
+              name="baud"
+              type="number"
+              min="9600"
+              max="500000"
+              step="1"
+              required /></label
+          ><button class="primary">Сохранить модели, адреса и шину</button>
+        </fieldset>
+      </form>
+      <p class="muted">
+        Ток, удержание, микрошаги, StealthChop/SpreadCycle и PWM доступны обеим
+        моделям. StallGuard и CoolStep у TMC2209 отключены; Z работает без
+        концевиков. Для TMC2208 предел формы — 1400 мА RMS, для TMC2209 — 2000
+        мА RMS; допустимый ток конкретного модуля зависит от его охлаждения.
+        Расчёт тока рассчитан на Rsense 0,11 Ом.
+      </p>
+      <section class="card">
+        <h2>Профиль «Момент и скорость» (значения по умолчанию)</h2>
+        <p>spreadCycle (StealthChop выключен), RMS 900 мА для осторожного первого включения,
+        удержание 50%, 16 микрошагов с интерполяцией 256, TOFF 5,
+        blank 24, hysteresis start 4, end 0. Это профиль динамической работы,
+        <strong>не универсально максимальный ток</strong>: для более высокого момента
+        ток подбирают по паспортному фазному току двигателя, охлаждению драйвера
+        и отсутствию пропуска шагов.</p>
+        <p>При spreadCycle параметры PWM offset/gradient/frequency/regulation/limit,
+        autoscale и autograd не управляют этим режимом; они предназначены для StealthChop.
+        Настройки, уже сохранённые в NVS, имеют приоритет над умолчаниями прошивки.
+        Вводите параметры вручную только при остановленных двигателях.</p>
+      </section>
+      <div class="grid">
+        <form id="nak" class="card" action="/settings/uart/save">
+          <fieldset disabled>
+            <h2 id="nakHeading">Наклон Y</h2>
+            <p id="nakConnection" role="status"></p>
+            <input type="hidden" name="motor" value="nak" />
+            <div class="fields"><label
+              >Ускорение наклона, шаг/с²<input
+                name="na"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label
+              >Скорость наклона, шаг/с<input
+                name="ns"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label><input type="checkbox" name="holdEnabled"> Использовать удержание мотором</label>
+              <label
+                >Ток RMS, мА<input
+                  name="rms"
+                  type="number"
+                  min="50"
+                  max="1400"
+                  step="1"
+                  required /></label
+              ><label
+                >Ток удержания, %<input
+                  name="holdPercent"
+                  type="number"
+                  min="10"
+                  max="100"
+                  step="1"
+                  required /></label
+              ><label
+                >Микрошаги<select name="micro">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="4">4</option>
+                  <option value="8">8</option>
+                  <option value="16">16</option>
+                  <option value="32">32</option>
+                  <option value="64">64</option>
+                  <option value="128">128</option>
+                  <option value="256">256</option>
+                </select></label
+              ><label
+                >TOFF<input
+                  name="toff"
+                  type="number"
+                  min="1"
+                  max="15"
+                  step="1"
+                  required /></label
+              ><label
+                >Blank time<select name="blank">
+                  <option value="16">16</option>
+                  <option value="24">24</option>
+                  <option value="36">36</option>
+                  <option value="54">54</option>
+                </select></label
+              ><label
+                >Hysteresis end<input
+                  name="hend"
+                  type="number"
+                  min="-3"
+                  max="12"
+                  step="1"
+                  required /></label
+              ><label
+                >Hysteresis start<input
+                  name="hstart"
+                  type="number"
+                  min="1"
+                  max="8"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM offset<input
+                  name="pwmo"
+                  type="number"
+                  min="0"
+                  max="255"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM gradient<input
+                  name="pwmgrad"
+                  type="number"
+                  min="0"
+                  max="255"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM frequency<input
+                  name="pwmfreq"
+                  type="number"
+                  min="0"
+                  max="3"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM regulation<input
+                  name="pwmreg"
+                  type="number"
+                  min="1"
+                  max="15"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM limit<input
+                  name="pwmlim"
+                  type="number"
+                  min="1"
+                  max="15"
+                  step="1"
+                  required /></label
+              ><label
+                >Freewheel<input
+                  name="freewheel"
+                  type="number"
+                  min="0"
+                  max="3"
+                  step="1"
+                  required /></label
+              ><label
+                >Send delay<input
+                  name="delay"
+                  type="number"
+                  min="2"
+                  max="15"
+                  step="1"
+                  required
+              /></label>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" name="stealth" /> StealthChop</label
+              ><label
+                ><input type="checkbox" name="autoscale" /> PWM autoscale</label
+              ><label
+                ><input type="checkbox" name="autograd" /> PWM autograd</label
+              ><label
+                ><input type="checkbox" name="intpol" /> Интерполяция</label
+              ><label
+                ><input type="checkbox" name="iscale" /> Аналоговый I
+                scale</label
+              ><label
+                ><input type="checkbox" name="irsense" /> Внутренний
+                Rsense</label
+              ><label
+                ><input type="checkbox" name="msfilter" /> Multistep
+                filter</label
+              >
+            </div>
+            <button type="button" class="button" data-torque-profile>Заполнить профиль «Момент/скорость»</button>
+            <button class="primary">Сохранить двигатель</button><p>Для проверки применяются введённые параметры после сохранения и подтверждения UART. Удерживайте кнопку движения; отпускание останавливает мотор.</p><div class="toolbar"><button type="button" data-test="minus">Тест −</button><button type="button" data-test="plus">Тест +</button><button type="button" data-test="stop">Стоп</button></div>
+          </fieldset>
+        </form>
+        <form id="pov" class="card" action="/settings/uart/save">
+          <fieldset disabled>
+            <h2 id="povHeading">Поворот Z</h2>
+            <p id="povConnection" role="status"></p>
+            <input type="hidden" name="motor" value="pov" />
+            <div class="fields"><label
+              >Ускорение поворота, шаг/с²<input
+                name="pa"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label
+              >Скорость поворота, шаг/с<input
+                name="ps"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label><input type="checkbox" name="holdEnabled"> Использовать удержание мотором</label>
+              <label
+                >Ток RMS, мА<input
+                  name="rms"
+                  type="number"
+                  min="50"
+                  max="1400"
+                  step="1"
+                  required /></label
+              ><label
+                >Ток удержания, %<input
+                  name="holdPercent"
+                  type="number"
+                  min="10"
+                  max="100"
+                  step="1"
+                  required /></label
+              ><label
+                >Микрошаги<select name="micro">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="4">4</option>
+                  <option value="8">8</option>
+                  <option value="16">16</option>
+                  <option value="32">32</option>
+                  <option value="64">64</option>
+                  <option value="128">128</option>
+                  <option value="256">256</option>
+                </select></label
+              ><label
+                >TOFF<input
+                  name="toff"
+                  type="number"
+                  min="1"
+                  max="15"
+                  step="1"
+                  required /></label
+              ><label
+                >Blank time<select name="blank">
+                  <option value="16">16</option>
+                  <option value="24">24</option>
+                  <option value="36">36</option>
+                  <option value="54">54</option>
+                </select></label
+              ><label
+                >Hysteresis end<input
+                  name="hend"
+                  type="number"
+                  min="-3"
+                  max="12"
+                  step="1"
+                  required /></label
+              ><label
+                >Hysteresis start<input
+                  name="hstart"
+                  type="number"
+                  min="1"
+                  max="8"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM offset<input
+                  name="pwmo"
+                  type="number"
+                  min="0"
+                  max="255"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM gradient<input
+                  name="pwmgrad"
+                  type="number"
+                  min="0"
+                  max="255"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM frequency<input
+                  name="pwmfreq"
+                  type="number"
+                  min="0"
+                  max="3"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM regulation<input
+                  name="pwmreg"
+                  type="number"
+                  min="1"
+                  max="15"
+                  step="1"
+                  required /></label
+              ><label
+                >PWM limit<input
+                  name="pwmlim"
+                  type="number"
+                  min="1"
+                  max="15"
+                  step="1"
+                  required /></label
+              ><label
+                >Freewheel<input
+                  name="freewheel"
+                  type="number"
+                  min="0"
+                  max="3"
+                  step="1"
+                  required /></label
+              ><label
+                >Send delay<input
+                  name="delay"
+                  type="number"
+                  min="2"
+                  max="15"
+                  step="1"
+                  required
+              /></label>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" name="stealth" /> StealthChop</label
+              ><label
+                ><input type="checkbox" name="autoscale" /> PWM autoscale</label
+              ><label
+                ><input type="checkbox" name="autograd" /> PWM autograd</label
+              ><label
+                ><input type="checkbox" name="intpol" /> Интерполяция</label
+              ><label
+                ><input type="checkbox" name="iscale" /> Аналоговый I
+                scale</label
+              ><label
+                ><input type="checkbox" name="irsense" /> Внутренний
+                Rsense</label
+              ><label
+                ><input type="checkbox" name="msfilter" /> Multistep
+                filter</label
+              >
+            </div>
+            <button type="button" class="button" data-torque-profile>Заполнить профиль «Момент/скорость»</button>
+            <button class="primary">Сохранить двигатель</button><p>Для проверки применяются введённые параметры после сохранения и подтверждения UART. Удерживайте кнопку движения; отпускание останавливает мотор.</p><div class="toolbar"><button type="button" data-test="minus">Тест −</button><button type="button" data-test="plus">Тест +</button><button type="button" data-test="stop">Стоп</button></div>
+          </fieldset>
+        </form>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+</main>
+    <footer id="siteFooter"></footer>
+  </body>
+</html>

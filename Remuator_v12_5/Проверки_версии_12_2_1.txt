@@ -1,0 +1,22 @@
+## Версия 12.2.1 — предупреждение библиотеки и русские комментарии
+
+Предупреждение [-Wdeprecated-declarations] означает, что beginResponse_P ещё поддерживается библиотекой, но объявлен устаревшим. Это не ошибка компиляции. В serveBootstrapFileManager вызов заменён на рекомендуемый beginResponse с теми же кодом 200, типом text/html; charset=utf-8 и встроенной страницей. Встроенный менеджер и авторизация сохранены.
+
+Поясняющие комментарии переведены на русский в скетче, заголовках, веб-файлах, инструментах, тестах и исходниках встроенных страниц. Переведены документационные строки Python. Имена функций, типов, API, файлов и технические сигнатуры сохранены. В AGENTS.md закреплено правило писать последующие комментарии по-русски.
+
+Исполняемые токены 51 файла прошивки и веб-интерфейса сопоставлены с 12.2: отличия только в указанном API и строке версии 12.2.1. Записи разделов Flash и CSV-программы не изменены; переведены лишь комментарии partitions.csv.
+
+Полная сборка ESP32-S3 выполнена с расширенным выводом предупреждений. Предупреждение beginResponse_P отсутствует. Отдельное предупреждение Touch API приходит из установленного ядра Arduino-ESP32 3.3.0; в проекте этот API не вызывается. Стороннее ядро не изменялось, предупреждения не скрывались.
+
+Прошли нативные тесты восстановления, UART, RTC, калибровки, сохранённых таблиц и нуля Z, удержания, перезагрузки и начальной настройки; тесты с настоящей GyverStepper; проверки JavaScript и DOM. Аппаратные испытания не выполнялись.
+
+Для устранения предупреждения достаточно обновить скетч. Чтобы получить русские комментарии во всех файлах, используйте полный комплект 12.2.1. Функциональность и интерфейс 12.2 сохранены. Не стирайте свои программы и калибровки при обновлении.
+
+
+Сборка с --warnings all:
+In file included from /workspace/tooling/arduino-data/packages/esp32/hardware/esp32/3.3.0/cores/esp32/esp32-hal-touch.c:19:
+/workspace/tooling/arduino-data/packages/esp32/tools/esp32-arduino-libs/idf-release_v5.5-b66b5448-v1/esp32s3/include/driver/touch_sensor/esp32s3/include/driver/touch_sensor.h:13:2: warning: #warning "This set of Touch APIs has been deprecated, please include 'driver/touch_sens.h' instead. if you want to keep using the old APIs and ignore this warning, you can enable 'Suppress legacy driver deprecated warning' option under 'Touch Configuration' menu in Kconfig" [-Wcpp]
+   13 | #warning "This set of Touch APIs has been deprecated, \
+      |  ^~~~~~~
+Sketch uses 1355659 bytes (32%) of program storage space. Maximum is 4194304 bytes.
+Global variables use 87428 bytes (26%) of dynamic memory, leaving 240252 bytes for local variables. Maximum is 327680 bytes.

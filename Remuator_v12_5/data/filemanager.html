@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <link href="/favicon.ico" rel="icon" sizes="any" type="image/x-icon" />
+    <link href="/favicon.ico" rel="shortcut icon" />
+    <meta content="width=device-width,initial-scale=1" name="viewport" />
+    <title>Remuage-VRN — файлы LittleFS</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/filemanager.css" />
+      <script src="/site-shell.js" defer></script>
+  </head>
+  <body>
+    <header id="siteHeader"></header>
+    <main class="file-main"><a id="back" class="btn" href="/" hidden>Назад</a>
+<h1>Файловый менеджер LittleFS</h1>
+    <nav class="flex">
+      <a class="btn" href="/?dir=/">Корень</a
+      ><a class="btn" href="/?dir=/prog">Программы</a
+      ><a class="btn" href="/?dir=/Logs">Логи</a>
+    </nav>
+    <p class="muted">
+      Для проверки изменений открывайте главную страницу заново. HTML, CSS и JS
+      загружаются из LittleFS; правки файла на компьютере требуют загрузки его
+      на ESP32.
+    </p>
+    <p class="muted">
+      Файловый менеджер работает на порту 8080. Его HTML, CSS и JavaScript также
+      находятся в корне LittleFS. Для входа требуется HTTP Basic Authentication.
+    </p>
+    <div class="card">
+      <div class="flex">
+        <button id="button-up">↖ Выше</button>
+        <strong class="grow" id="folder"> / </strong>
+        <button id="button-refresh">Обновить</button>
+      </div>
+      <p id="message" role="status"></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Имя</th>
+            <th>Размер</th>
+            <th>Тип</th>
+            <th>Операции</th>
+          </tr>
+        </thead>
+        <tbody id="entries">
+          <tr>
+            <td colspan="4">Загрузка…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Загрузка файлов</h2>
+      <div id="drop">Перетащите сюда файлы или выберите их ниже</div>
+      <div class="flex" id="uploadControls">
+        <input class="grow" id="files" multiple="" type="file" />
+        <button id="button-upload">Загрузить в эту папку</button>
+      </div>
+      <p class="muted">
+        Все HTML, CSS, JS и favicon.ico из папки data загрузите в корень
+        <code>/</code>. CSV храните в <code>/prog/</code>.
+      </p>
+    </div>
+    <div class="card">
+      <h2>Создать папку</h2>
+      <div class="flex">
+        <input class="grow" id="newfolder" placeholder="Например: prog" />
+        <button id="button-mkdir">Создать</button>
+      </div>
+    </div>
+    <div class="card" id="editor">
+      <h2>
+        Редактор
+        <span id="editname"> </span>
+      </h2>
+      <textarea id="edittext" spellcheck="false"></textarea>
+      <div class="flex">
+        <button id="button-saveText">Сохранить</button>
+        <button id="button-closeEditor">Закрыть</button>
+      </div>
+    </div>
+    </main>
+    <footer id="siteFooter"></footer>
+    <script src="/filemanager.js" defer></script>
+  </body>
+</html>
