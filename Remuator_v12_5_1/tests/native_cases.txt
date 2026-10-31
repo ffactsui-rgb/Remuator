@@ -1,0 +1,108 @@
+void fresh() {
+  xProtectionTripped=false;calCurrentX=calRefX=0;calToleranceX=3;calRunToleranceX=20;
+  sensorFallbackY=false;yBootReferencePending=true;bootSensorWaitMs=0;sensorReads=0;
+  LittleFS=FakeFS{};prefs.blobs.clear();
+  executionJournal.~CheckedJournal();new(&executionJournal) CheckedJournal<ExecutionFileStorage,ExecutionRecord>(executionStorage);
+  calAdxlPresent=true;programTiltSamplingActive=false;calAngle=23;calLastOkMs=1;recoveryCountdownStarted=false;
+  mono=0;wall=1800000000;validClock=true;motor_Naklon={};motor_Povorot={};
+  runMeta={};execState={};recoveryAutoPending=recoveryRequired=recoveryMotionUncertain=false;
+  executionReadError=executionJournalDegraded=homingActive=homingZPhase=pauseStopPending=false;zHomeCalibrated=true;
+  programRunning=programPaused=serialMoveNaklonActive=serialMovePovorotActive=false;
+  motorNaklonMoving=motorPovorotMoving=endstopYActive=endstopUpperActive=yEndstopFault=false;
+  lowerPin=upperPin=LOW;lowerEndstop={};upperEndstop={};
+  programState=IDLE;currentProgramStep=0;programs.clear();
+  RemuageProgram p={};std::string error;
+  assert(parseProgramCsv("Step;incAngle;Angle;IncRot;Rot;Pause\n1;7;;1;;00:00:30\n2;1;;-1;;00:00:30\n3;-1;;0;;00:00:30\n",p,error));
+  strcpy(p.name,"Test");programs.push_back(p);startProgram();assert(programRunning);
+}
+void rebootAt(int64_t epoch) {
+  mono=0;wall=epoch;motor_Naklon={};motor_Povorot={};yBootReferencePending=true;xProtectionTripped=false;
+  programRunning=programPaused=false;serialMoveNaklonActive=serialMovePovorotActive=false;
+  recoveryRequired=recoveryAutoPending=recoveryMotionUncertain=false;
+  executionReadError=false;executionMessage="";
+  restoreExecutionAfterBoot();
+}
+void finishAxes() {
+  motor_Naklon.complete();calAngle=stepsToAngleNaklon(motor_Naklon.current);calLastOkMs=millis();executeProgram();
+  advance(1);executeProgram();executeProgram();
+  motor_Povorot.complete();advance(6);executeProgram();
+}
+int main(){
+  // В штатном режиме Y завершается по счётчику STEP независимо от измеренного угла.
+  fresh();motor_Naklon.complete();calAngle=23;executeProgram();assert(execState.naklonCompleted);
+  advance(1);executeProgram();executeProgram();assert(programState==MOVING_POVOROT);
+  motor_Povorot.complete();advance(5);executeProgram();assert(!execState.povorotCompleted);
+  advance(1);executeProgram();assert(execState.povorotCompleted);
+  // Сбой питания во время Z: записанная команда принимается выполненной и повторно не выдаётся.
+  fresh();motor_Naklon.complete();calAngle=stepsToAngleNaklon(motor_Naklon.current);executeProgram();advance(1);executeProgram();executeProgram();
+  const auto zTarget=motor_Povorot.target;assert(programState==MOVING_POVOROT);
+  rebootAt(1800000005);assert(programRunning&&execState.povorotCompleted&&!recoveryMotionUncertain);
+  serviceRecovery();assert(!programPaused&&motor_Povorot.commands==0&&motor_Povorot.current==zTarget);
+  assert(scheduledEpoch[1]==1800000030);
+  // Один переход в фазу Z ещё не является выдачей команды: поворот должен быть выполнен один раз.
+  fresh();motor_Naklon.complete();calAngle=stepsToAngleNaklon(motor_Naklon.current);executeProgram();advance(1);executeProgram();
+  assert(programState==MOVING_POVOROT&&!serialMovePovorotActive);
+  rebootAt(1800000005);assert(!execState.povorotCompleted);serviceRecovery();assert(serialMovePovorotActive&&motor_Povorot.commands==1);
+  // Прерванный ход Y продолжается по измерению; сохранённый счётчик не считается достоверным.
+  fresh();calAngle=26;rebootAt(1800000005);serviceRecovery();assert(!programPaused&&!recoveryRequired);
+  assert(!execState.naklonCompleted&&programState==MOVING_NAKLON);
+  // Пропущено несколько сроков: выдержать 2 с, выполнить первую незавершённую строку и пересчитать остальные.
+  fresh();finishAxes();rebootAt(1800001000);serviceRecovery();assert(programPaused&&recoveryAutoPending);
+  advance(1);serviceRecovery();assert(programPaused);
+  advance(1);serviceRecovery();assert(!programPaused&&currentProgramStep==1);
+  assert(scheduledEpoch[1]==1800001002&&scheduledEpoch[2]==1800001032&&scheduledEpoch[3]==1800001062);
+  // Повторный сбой во время отсчёта не превращает автоматическое восстановление в ручную паузу.
+  fresh();finishAxes();rebootAt(1800001000);serviceRecovery();rebootAt(1800001001);assert(recoveryAutoPending);
+  // Нет ускоренного выполнения просроченных шагов; без датчика восстановление блокируется без требования перекалибровки.
+  fresh();calAdxlPresent=false;rebootAt(1800000005);serviceRecovery();assert(programPaused&&recoveryRequired);
+  calAdxlPresent=true;serviceRecovery();assert(!programPaused);
+  fresh();pauseProgram();rebootAt(1800000005);serviceRecovery();assert(programPaused&&!recoveryAutoPending);
+  // При разрыве или повреждении последней записи используется целая резервная запись.
+  fresh();finishAxes();assert(saveExecution());auto slot=executionJournal.lastSlot();
+  const char*path=slot==0?"/state/execution-a.bin":"/state/execution-b.bin";
+  if(LittleFS.files.count(path)&&!LittleFS.files[path].empty())LittleFS.files[path][0]^=1;
+  rebootAt(1800000005);assert(!executionReadError);
+  // Реальный угол остаётся информацией: даже большое расхождение не меняет карту.
+  fresh();motor_Naklon.complete();calAngle=80;calLastOkMs=millis();executeProgram();assert(execState.naklonCompleted);
+  // Явный выбор стартовой строки использует сохранённую калибровку.
+  fresh();stopProgram();startProgram(2);assert(programRunning&&currentProgramStep==1&&scheduledEpoch[0]==0);
+  // Потеря датчика не ставит программу на паузу и не меняет срок следующей строки.
+  fresh();auto deadline=scheduledEpoch[1];auto beforeReads=sensorReads;auto beforeTarget=motor_Naklon.target;
+  advance(2);calAdxlPresent=false;executeProgram();assert(!programPaused&&programRunning);
+  assert(motor_Naklon.target==beforeTarget&&scheduledEpoch[1]==deadline&&sensorReads==beforeReads);
+  motor_Naklon.complete();executeProgram();assert(execState.naklonCompleted&&!programPaused);
+  // Новая строка не назначает координату STEP по свежему ADXL345.
+  fresh();motor_Naklon.complete();executeProgram();advance(1);executeProgram();executeProgram();
+  motor_Povorot.complete();advance(6);executeProgram();advance(30);executeProgram();
+  assert(currentProgramStep==1);auto knownPosition=motor_Naklon.current;beforeReads=sensorReads;
+  calAdxlPresent=true;calAngle=85;calLastOkMs=millis();executeProgram();
+  assert(motor_Naklon.current==knownPosition&&sensorReads==beforeReads);
+  // Ручная пауза и продолжение используют ту же карту даже без датчика.
+  fresh();calAdxlPresent=false;pauseProgram();advance(10);assert(resumeProgram());executeProgram();assert(!programPaused);
+  stopProgram();assert(!programRunning);
+  // Один раз после питания координата восстанавливается по датчику; обычный пуск её не переписывает.
+  fresh();stopProgram();motor_Naklon.brake();motor_Povorot.brake();calAdxlPresent=true;calAngle=37;
+  yBootReferencePending=true;assert(synchronizeYAfterPower());assert(motor_Naklon.current==calibratedAngleToSteps(37));
+  knownPosition=motor_Naklon.current;calAngle=80;assert(!synchronizeYAfterPower());startProgram();assert(motor_Naklon.current==knownPosition);
+  // При восстановлении питания NC-границы приоритетнее шумящего измерения угла.
+  fresh();stopProgram();motor_Naklon.brake();motor_Povorot.brake();lowerPin=HIGH;calAngle=25;
+  yBootReferencePending=true;assert(synchronizeYAfterPower());assert(motor_Naklon.current==0);
+  lowerPin=LOW;upperPin=HIGH;yBootReferencePending=true;assert(synchronizeYAfterPower());assert(motor_Naklon.current==calibratedUpperSteps());
+  // После отключения питания без датчика сохраняется возможность продолжить по последней записи STEP.
+  fresh();calAdxlPresent=false;rebootAt(1800000005);serviceRecovery();advance(5);serviceRecovery();assert(!programPaused&&sensorFallbackY);
+  // Допуски X независимы: 3,1° блокирует новый старт, 10° во время программы допускается.
+  fresh();stopProgram();calCurrentX=3.1f;startProgram();assert(!programRunning);
+  fresh();calCurrentX=10;calLastOkMs=millis();executeProgram();assert(!programPaused&&!xProtectionTripped);
+  // Превышение 20° останавливает обе оси и фиксирует ручную паузу без автоматического продолжения.
+  calCurrentX=20.1f;calLastOkMs=millis();executeProgram();assert(programPaused&&xProtectionTripped&&!drivers);
+  assert(motor_Naklon.current==motor_Naklon.target&&motor_Povorot.current==motor_Povorot.target&&!recoveryAutoPending);
+  calAdxlPresent=false;assert(!resumeProgram());calAdxlPresent=true;calCurrentX=21;calSample(true);assert(!resumeProgram());
+  calCurrentX=1;calSample(true);executeProgram();assert(programPaused);assert(resumeProgram());assert(!xProtectionTripped&&!programPaused);
+  // Защитная пауза во время Z сохраняет признак уже поданной команды при потере питания.
+  fresh();motor_Naklon.complete();executeProgram();advance(1);executeProgram();executeProgram();assert(serialMovePovorotActive);
+  calCurrentX=21;calLastOkMs=millis();executeProgram();assert(xProtectionTripped);rebootAt(1800000010);assert(execState.povorotCompleted&&!recoveryAutoPending);
+  fresh();calCurrentX=-21;calLastOkMs=millis();executeProgram();
+  // Аварийная пауза переживает питание и не превращается в автопродолжение.
+  calCurrentX=-21;calLastOkMs=millis();executeProgram();assert(xProtectionTripped);rebootAt(1800000010);serviceRecovery();assert(programPaused&&!recoveryAutoPending);
+  std::cout<<"PASS: Y step map without ADXL gating or row resync, one-time measured boot reference, 6-second Z, power recovery, preserved deadlines, pause and journal fallback\n";
+}

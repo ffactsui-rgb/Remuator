@@ -1,0 +1,17 @@
+import {JSDOM} from 'jsdom';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const root=new URL('../../',import.meta.url).pathname;
+const html=readFileSync(root+'data/help.html','utf8');
+const header=readFileSync(root+'user_guide_page.h','utf8');
+assert.equal(header.split('R"GUIDE(')[1].split(')GUIDE";')[0],html);
+const dom=new JSDOM(html,{url:'http://192.168.4.1/help',runScripts:'outside-only'});
+assert.equal(dom.window.document.querySelectorAll('h2').length,19);
+for(const a of dom.window.document.querySelectorAll('.guide-toc a'))assert(dom.window.document.getElementById(a.hash.slice(1)));
+assert.match(dom.window.document.body.textContent,/медиана трёх кадров/i);
+assert.match(dom.window.document.body.textContent,/±3°/);assert.match(dom.window.document.body.textContent,/±20°/);
+assert.match(dom.window.document.body.textContent,/шесть часов/);
+dom.window.fetch=async()=>({ok:true,json:async()=>({version:'12.5'})});
+dom.window.eval(readFileSync(root+'data/site-shell.js','utf8'));
+assert(dom.window.document.querySelector('.site-menu a[href="/help"][aria-current="page"]'));
+dom.window.close();console.log('PASS: full guide content/anchors/navigation and exact Flash copy');

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Настройки — Remuage-VRN</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/settings.js"></script>
+    <script src="/site-shell.js" defer></script>
+  <script type="module" src="/parameter-help.js"></script></head>
+  <body>
+    <header id="siteHeader"></header>
+    <main>
+      <h1>Настройки</h1>
+      <nav class="settings-tabs" aria-label="Разделы настроек">
+        <a href="/settings" aria-current="page">Основные</a>
+        <a href="/settings/calibration-y">Калибровка Y</a>
+        <a href="/settings/calibration-z">Калибровка Z</a>
+        <a href="/settings/uart">Настройки TMC</a>
+        <a href="/settings/serial">Serial</a>
+        <a href="/settings/about">О программе</a>
+      </nav>
+
+      <div id="error" role="alert" hidden></div>
+      <form id="settingsForm" action="/settings/save" class="card">
+        <fieldset disabled>
+          <div class="fields">
+            <label
+              >Период веб-обработки, мс<input
+                name="web"
+                type="number"
+                min="1"
+                max="1000"
+                step="1"
+                required /></label
+            ><label
+              >Период обновления интерфейса, мс<input
+                name="refresh"
+                type="number"
+                min="250"
+                max="60000"
+                step="1"
+                required /></label
+            ><label
+              >Задержка после наклона, мс<input
+                name="pn"
+                type="number"
+                min="0"
+                max="60000"
+                step="1"
+                required /></label
+            ><label
+              >Максимальное время движения, с<input
+                name="max"
+                type="number"
+                min="1"
+                step="1"
+                required /></label
+            ><label
+              >Часовой пояс контроллера (POSIX TZ)<input
+                name="tz"
+                required
+                maxlength="100"
+            /></label>
+            <label>Период синхронизации NTP по Wi-Fi, минут
+              <input name="ntpPeriodMin" type="number" min="1" max="10080" step="1" required />
+            </label>
+            <label>Сервер NTP 1
+              <input name="ntpServer1" maxlength="120" required />
+            </label>
+            <label>Сервер NTP 2
+              <input name="ntpServer2" maxlength="120" required />
+            </label>
+          </div>
+          <p class="muted">
+            Для Москвы: <code>MSK-3</code>. Этот пояс используется на OLED.
+            Календарь в браузере показывает местное время браузера.
+          </p>
+          <p id="controllerClock"></p>
+          <p id="rtcStatus" class="muted"></p>
+          <label class="check-inline"><input type="checkbox" name="serialOn" /> Включить Serial Monitor и USB-команды (сохраняется после перезагрузки; UART двигателей работает независимо)</label>
+          <button class="primary">Сохранить настройки</button>
+        </fieldset>
+      </form>
+      <section class="card">
+        <h2>Установка даты и времени</h2>
+        <p>DS3231 хранит UTC и продолжает отсчёт с резервной батареей. При синхронизации время ESP32 записывается в DS3231, когда двигатели остановлены.</p>
+        <div class="fields"><label>Установить вручную (местное время браузера)
+          <input id="manualTime" type="datetime-local" step="1" />
+        </label></div>
+        <div class="toolbar">
+          <button id="manualSet" type="button">Установить указанное время</button>
+          <button id="browserSet" type="button">Взять время компьютера/телефона</button>
+          <button id="ntpSync" type="button">Синхронизировать NTP сейчас</button>
+        </div>
+      </section>
+      <a class="button" href="/settings/uart"
+        >Настройки UART / TMC2208 / TMC2209</a
+      >
+      <button id="reboot" class="danger" type="button">Перезагрузка</button>
+      <p id="status" role="status" aria-live="polite"></p>
+</main>
+    <footer id="siteFooter"></footer>
+  </body>
+</html>

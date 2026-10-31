@@ -1,0 +1,22 @@
+import {JSDOM} from 'jsdom';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const root=new URL('../../data/',import.meta.url).pathname;
+const dom=new JSDOM(readFileSync(root+'calibration-y.html','utf8'),{url:'http://192.168.4.1/settings/calibration-y',runScripts:'outside-only'});
+Object.assign(globalThis,{window:dom.window,document:dom.window.document,location:dom.window.location,FormData:dom.window.FormData});
+const data={present:true,angleY:35.6,angleX:-0.3,xAxis:0,yAxis:1,xTolerance:3,xRunTolerance:20,xStored:true,xReference:0,xDeviation:0.3,xOk:true,xRunOk:true,phase:'idle',rawCount:0,totalSteps:108410,runReady:true,accel:[0,0.58,0.81],raw:[{angle:35.6,stepsFrom85:100,stepsFrom23:108310}],saved:[]};
+const posts=[];
+globalThis.fetch=async(url,options)=>{
+ if(options?.method==='POST')posts.push(options.body);
+ return {ok:true,text:async()=>JSON.stringify(data)};
+};
+const appUrl='data:text/javascript;base64,'+Buffer.from(readFileSync(root+'app.js','utf8')).toString('base64');
+let source=readFileSync(root+'calibration-y.js','utf8').replace('"./app.js"',JSON.stringify(appUrl)).replaceAll('setInterval(', 'window.setInterval(');
+await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const wait=()=>new Promise(r=>setTimeout(r,30));await wait();
+assert.equal(document.getElementById('tilt').textContent,'35.6');assert.equal(document.getElementById('roll').textContent,'-0.3');
+assert.match(document.getElementById('rawRows').textContent,/35.6/);
+const form=document.getElementById('axesForm');assert.equal(form.elements.xTolerance.value,'3');assert.equal(form.elements.xRunTolerance.value,'20');
+form.dispatchEvent(new window.Event('submit',{cancelable:true}));await wait();
+assert.equal(posts[0].get('xTolerance'),'3');assert.equal(posts[0].get('xRunTolerance'),'20');
+dom.window.close();console.log('PASS: sensor readings at one decimal, separate X settings load and submit');
